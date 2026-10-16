@@ -136,29 +136,38 @@ class Heuristic37Solver(BaseSolver):
             dist_acc += instance.grafo.distancia(rota[i], rota[i + 1])
             distancias_restantes[rota[i]] = dist_acc
 
-        # 3. Cálculo do score marginal sem alpha arbitrário
-        # Impacto físico marginal: tempo adicional gasto devido à redução de velocidade
-        # provocada pelo peso do item transportado pela distância restante.
-        v_avg = (instance.v_max + instance.v_min) / 2.0
+        # 3. Cálculo de velocidade física e impacto marginal no tempo de viagem
         cap_mochila = max(instance.capacidade_mochila, 1e-6)
+        v_min = instance.v_min
+        v_max = instance.v_max
+        taxa_aluguel = instance.taxa_aluguel
 
-        def calcular_score(item: Item) -> float:
+        def velocidade(peso: float) -> float:
+            return max(v_min, v_max - peso * ((v_max - v_min) / cap_mochila))
+
+        def calcular_lucro_marginal(item: Item, peso_mochila: float) -> float:
+            """
+            Calcula o lucro líquido adicional exato ao adicionar este item à mochila
+            já carregando peso_mochila, considerando a redução real de velocidade
+            ao longo de toda a distância restante até a cidade 1.
+            """
+            if item.peso <= 0:
+                return item.valor
+            d_restante = distancias_restantes.get(item.cidade_origem, 0.0)
+            v_antes = velocidade(peso_mochila)
+            v_depois = velocidade(peso_mochila + item.peso)
+            delta_tempo = d_restante * (1.0 / v_depois - 1.0 / v_antes)
+            custo_transporte = taxa_aluguel * delta_tempo
+            return item.valor - custo_transporte
+
+        def calcular_score(item: Item, peso_mochila: float = 0.0) -> float:
             if item.peso <= 0:
                 return float("inf")
-            d_restante = distancias_restantes.get(item.cidade_origem, 0.0)
-            # Custo marginal estimado = aluguel * delta_tempo
-            custo_transporte = (
-                instance.taxa_aluguel
-                * d_restante
-                * ((instance.v_max - instance.v_min) / (cap_mochila * (v_avg ** 2)))
-                * item.peso
-            )
-            lucro_liquido = item.valor - custo_transporte
-            return lucro_liquido / item.peso
+            lucro = calcular_lucro_marginal(item, peso_mochila)
+            return lucro / item.peso
 
         # 4. Sequência da secretária:
         # Itens dispostos na ordem natural em que são visitados ao longo da rota
-        # (NUNCA pré-ordenados por score, pois isso colocaria os melhores na calibração)
         itens_sequenciais: List[Item] = []
         for cidade_id in rota:
             cidade = instance.grafo.cidades[cidade_id]
@@ -169,34 +178,55 @@ class Heuristic37Solver(BaseSolver):
         itens_calibracao = itens_sequenciais[:limite_calibracao]
         itens_coleta = itens_sequenciais[limite_calibracao:]
 
-        # Fase de calibração: observa os scores dos primeiros 37%
-        scores_calibracao = [calcular_score(item) for item in itens_calibracao]
+        # Fase de calibração: observa os scores intrínsecos dos primeiros 37% (avaliados em mochila vazia)
+        scores_calibracao = [calcular_score(item, 0.0) for item in itens_calibracao]
         melhor_threshold = max(scores_calibracao) if scores_calibracao else 0.0
-        # O limiar nunca deve ser negativo, para não coletar itens que geram prejuízo
+        # O limiar nunca deve ser negativo
         limiar = max(melhor_threshold, 0.0)
 
-        # Fase de decisão/coleta: coleta itens que superam o benchmark
+        # Fase de decisão/coleta da secretária: coleta itens que superem o benchmark
         peso_atual = 0.0
         plano_coleta: Dict[int, List[int]] = {}
+        itens_coletados_ids = set()
 
         for item in itens_coleta:
-            score = calcular_score(item)
-            if score >= limiar and score > 0:
-                if peso_atual + item.peso <= instance.capacidade_mochila:
+            if peso_atual + item.peso <= instance.capacidade_mochila:
+                score = calcular_score(item, peso_atual)
+                # Coleta apenas itens com score estritamente positivo e superior ao limiar
+                if score > limiar:
                     peso_atual += item.peso
+                    itens_coletados_ids.add(item.id)
                     if item.cidade_origem not in plano_coleta:
                         plano_coleta[item.cidade_origem] = []
                     plano_coleta[item.cidade_origem].append(item.id)
 
-        # Fallback de segurança: se o limiar dos 37% foi muito alto e nenhum item foi pego,
-        # aceita qualquer item dos 63% restantes com score positivo (> 0)
-        if not plano_coleta:
-            for item in itens_coleta:
-                score = calcular_score(item)
-                if score > 0 and peso_atual + item.peso <= instance.capacidade_mochila:
-                    peso_atual += item.peso
-                    if item.cidade_origem not in plano_coleta:
-                        plano_coleta[item.cidade_origem] = []
-                    plano_coleta[item.cidade_origem].append(item.id)
+        # 5. Preenchimento guloso pós-secretária:
+        # Aproveita qualquer espaço residual na mochila para incluir itens ainda não coletados
+        # (inclusive da fase de calibração ou dos 63% restantes) que aumentem o lucro final total.
+        itens_candidatos = [it for it in instance.itens if it.id not in itens_coletados_ids]
+
+        while peso_atual < instance.capacidade_mochila:
+            melhor_item = None
+            melhor_densidade = 0.0
+
+            for it in itens_candidatos:
+                if peso_atual + it.peso <= instance.capacidade_mochila:
+                    lucro_adicional = calcular_lucro_marginal(it, peso_atual)
+                    if lucro_adicional > 0:
+                        densidade = lucro_adicional / it.peso if it.peso > 0 else float("inf")
+                        if densidade > melhor_densidade:
+                            melhor_densidade = densidade
+                            melhor_item = it
+
+            if melhor_item is not None:
+                peso_atual += melhor_item.peso
+                itens_coletados_ids.add(melhor_item.id)
+                itens_candidatos.remove(melhor_item)
+                if melhor_item.cidade_origem not in plano_coleta:
+                    plano_coleta[melhor_item.cidade_origem] = []
+                plano_coleta[melhor_item.cidade_origem].append(melhor_item.id)
+            else:
+                # Nenhum item adicional gera lucro positivo dentro da capacidade
+                break
 
         return SolucaoTTP(rota=rota, plano_coleta=plano_coleta)
