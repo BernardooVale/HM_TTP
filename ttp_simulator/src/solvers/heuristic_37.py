@@ -1,5 +1,5 @@
 import math
-from typing import Dict, List
+from typing import Dict, List, Optional
 from src.core.models import TTPInstance, SolucaoTTP, Item, Grafo
 from src.solvers.base import BaseSolver, SolverRegistry
 
@@ -116,9 +116,13 @@ class Heuristic37Solver(BaseSolver):
     - A partir dos 37%, seleciona itens que superem esse benchmark enquanto couber na mochila.
     """
 
+    def __init__(self, refinamento: bool = False, nome: Optional[str] = None):
+        self.refinamento = refinamento
+        self._nome = nome or ("heuristic_37_refinada" if refinamento else "heuristic_37")
+
     @property
     def nome(self) -> str:
-        return "heuristic_37"
+        return self._nome
 
     def solve(self, instance: TTPInstance) -> SolucaoTTP:
         # 1. Rota TSP de menor distância iniciando na cidade 1
@@ -229,4 +233,18 @@ class Heuristic37Solver(BaseSolver):
                 # Nenhum item adicional gera lucro positivo dentro da capacidade
                 break
 
+        if self.refinamento:
+            from src.solvers.pack_iterative import refinar_plano_coleta
+            plano_coleta = refinar_plano_coleta(instance, rota, plano_coleta)
+
         return SolucaoTTP(rota=rota, plano_coleta=plano_coleta)
+
+
+# Registro de variação com refinamento ativado para comparação direta
+SolverRegistry.register(
+    type(
+        "Heuristic37RefinadaSolver",
+        (Heuristic37Solver,),
+        {"nome": "heuristic_37_refinada", "__init__": lambda self: Heuristic37Solver.__init__(self, refinamento=True, nome="heuristic_37_refinada")},
+    )
+)

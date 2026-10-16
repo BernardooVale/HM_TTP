@@ -6,7 +6,6 @@ from typing import Dict, List, Optional, Set, Tuple
 from src.core.models import Item, SolucaoTTP, TTPInstance
 from src.solvers.base import BaseSolver, SolverRegistry
 
-
 def resolver_knapsack_01_exato(itens: List[Item], capacidade: float) -> Tuple[float, List[Item]]:
     """
     Resolve o Problema da Mochila 0/1 de forma exata usando Branch and Bound com poda.
@@ -69,7 +68,6 @@ def resolver_knapsack_01_exato(itens: List[Item], capacidade: float) -> Tuple[fl
     branch_and_bound(0, 0.0, 0.0, [])
     return melhor_valor[0], melhor_selecao[0]
 
-
 def resolver_knapsack_guloso(itens: List[Item], capacidade: float) -> Tuple[float, List[Item]]:
     """
     Resolve a mochila de forma gulosa (ordenada por valor/peso).
@@ -109,26 +107,32 @@ class QueimadaSolver(BaseSolver):
 
     def __init__(
         self,
-        temperatura: str = "knapsack_greedy",
-        dissipacao: str = "dijkstra",
+        temperatura: str = "total_value",
+        dissipacao: str = "bfs",
         direcao: str = "calor_final",
         selecao: str = "greedy_relative",
-        metodo_construcao: str = "walk",
+        metodo_construcao: str = "kruskal",
+        ordem_selecao: str = "densidade",
+        refinamento: bool = True,
         nome: Optional[str] = None,
     ):
         """
         Parâmetros:
-        - temperatura: 'total_value', 'knapsack_exact', 'knapsack_greedy'
-        - dissipacao: 'adjacent_only', 'dijkstra', 'bfs'
-        - direcao: 'calor_final' (maior calor no final da rota), 'calor_inicio' (maior calor no início)
-        - selecao: 'greedy_relative', 'knapsack_relative'
-        - metodo_construcao: 'walk' (caminhada sequencial gulosa por calor), 'kruskal' (ciclo Kruskal orientado)
+        - temperatura: 'total_value', 'knapsack_exact', 'knapsack_greedy' (padrão ótimo: 'total_value')
+        - dissipacao: 'adjacent_only', 'dijkstra', 'bfs' (padrão ótimo: 'bfs')
+        - direcao: 'calor_final' (maior calor no final da rota), 'calor_inicio' (padrão ótimo: 'calor_final')
+        - selecao: 'greedy_relative', 'knapsack_relative' (padrão ótimo: 'greedy_relative')
+        - metodo_construcao: 'walk', 'kruskal' (padrão ótimo: 'kruskal')
+        - ordem_selecao: 'densidade', 'reversa', 'sequencial' (padrão ótimo: 'densidade')
+        - refinamento: se True, executa busca local Drop & Add no plano de empacotamento final (padrão ótimo: True)
         """
         self.temperatura_modo = temperatura
         self.dissipacao_modo = dissipacao
         self.direcao_modo = direcao
         self.selecao_modo = selecao
         self.metodo_construcao = metodo_construcao
+        self.ordem_selecao = ordem_selecao
+        self.refinamento = refinamento
         self._nome = nome or "queimada"
 
     @property
@@ -369,15 +373,44 @@ class QueimadaSolver(BaseSolver):
         plano_coleta: Dict[int, List[int]] = {}
 
         if self.selecao_modo == "greedy_relative":
-            # Ordena por densidade de lucro líquido (lucro_liquido / peso)
-            itens_com_lucro.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
-            peso_atual = 0.0
-            for _, item in itens_com_lucro:
-                if peso_atual + item.peso <= instance.capacidade_mochila:
-                    peso_atual += item.peso
-                    if item.cidade_origem not in plano_coleta:
-                        plano_coleta[item.cidade_origem] = []
-                    plano_coleta[item.cidade_origem].append(item.id)
+            if self.ordem_selecao == "densidade":
+                # Ordena por densidade de lucro líquido (lucro_liquido / peso)
+                itens_com_lucro.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
+                peso_atual = 0.0
+                for _, item in itens_com_lucro:
+                    if peso_atual + item.peso <= instance.capacidade_mochila:
+                        peso_atual += item.peso
+                        if item.cidade_origem not in plano_coleta:
+                            plano_coleta[item.cidade_origem] = []
+                        plano_coleta[item.cidade_origem].append(item.id)
+            elif self.ordem_selecao == "reversa":
+                # Visita as cidades de trás para frente na rota (do fim ao início)
+                cidades_reversas = [c for c in reversed(rota) if c != 1]
+                peso_atual = 0.0
+                for cid in cidades_reversas:
+                    itens_cid = [x for x in itens_com_lucro if x[1].cidade_origem == cid]
+                    itens_cid.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
+                    for _, item in itens_cid:
+                        if peso_atual + item.peso <= instance.capacidade_mochila:
+                            peso_atual += item.peso
+                            if cid not in plano_coleta:
+                                plano_coleta[cid] = []
+                            plano_coleta[cid].append(item.id)
+            elif self.ordem_selecao == "sequencial":
+                # Visita as cidades na ordem sequencial direta da rota
+                cidades_seq = [c for c in rota if c != 1]
+                peso_atual = 0.0
+                for cid in cidades_seq:
+                    itens_cid = [x for x in itens_com_lucro if x[1].cidade_origem == cid]
+                    itens_cid.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
+                    for _, item in itens_cid:
+                        if peso_atual + item.peso <= instance.capacidade_mochila:
+                            peso_atual += item.peso
+                            if cid not in plano_coleta:
+                                plano_coleta[cid] = []
+                            plano_coleta[cid].append(item.id)
+            else:
+                raise ValueError(f"Ordem de seleção de cidades inválida: {self.ordem_selecao}")
 
         elif self.selecao_modo == "knapsack_relative":
             # Constrói itens com valor ajustado para o KP exato
@@ -395,6 +428,10 @@ class QueimadaSolver(BaseSolver):
 
         else:
             raise ValueError(f"Modo de seleção de itens inválido: {self.selecao_modo}")
+
+        if self.refinamento:
+            from src.solvers.pack_iterative import refinar_plano_coleta
+            plano_coleta = refinar_plano_coleta(instance, rota, plano_coleta)
 
         return plano_coleta
 
@@ -455,5 +492,46 @@ SolverRegistry.register(
         "QueimadaKruskalSolver",
         (QueimadaSolver,),
         {"nome": "queimada_kruskal", "__init__": lambda self: QueimadaSolver.__init__(self, metodo_construcao="kruskal", nome="queimada_kruskal")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaReversaSolver",
+        (QueimadaSolver,),
+        {"nome": "queimada_reversa", "__init__": lambda self: QueimadaSolver.__init__(self, ordem_selecao="reversa", nome="queimada_reversa")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaRefinadaSolver",
+        (QueimadaSolver,),
+        {"nome": "queimada_refinada", "__init__": lambda self: QueimadaSolver.__init__(self, refinamento=True, nome="queimada_refinada")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaReversaRefinadaSolver",
+        (QueimadaSolver,),
+        {"nome": "queimada_reversa_refinada", "__init__": lambda self: QueimadaSolver.__init__(self, ordem_selecao="reversa", refinamento=True, nome="queimada_reversa_refinada")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaLegacySolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_legacy",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                temperatura="knapsack_greedy",
+                dissipacao="dijkstra",
+                direcao="calor_final",
+                selecao="greedy_relative",
+                metodo_construcao="walk",
+                ordem_selecao="densidade",
+                refinamento=False,
+                nome="queimada_legacy",
+            ),
+        },
     )
 )
