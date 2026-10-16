@@ -2,6 +2,7 @@ from .base import BaseSolver, SolverRegistry
 from .baselines import RandomSolver, GreedyIsolatedSolver
 from .local_search import AlternateLocalSearchSolver
 from .heuristic_37 import Heuristic37Solver
+from .queimada import QueimadaSolver
 
 __all__ = [
     "BaseSolver",
@@ -9,5 +10,7 @@ __all__ = [
     "RandomSolver",
     "GreedyIsolatedSolver",
     "AlternateLocalSearchSolver",
-    "Heuristic37Solver"
+    "Heuristic37Solver",
+    "QueimadaSolver"
 ]
+
