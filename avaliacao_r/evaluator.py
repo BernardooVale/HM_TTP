@@ -147,10 +147,11 @@ def avaliar_ponto_r(
     # 5. TTP Integrado Ótimo (Branch & Bound Global)
     num_cidades = instance.dimension or len(instance.grafo.cidades)
     if num_cidades <= config.max_cidades_exato_ttp:
+        timeout_ponto = min(5.0, max(0.5, config.timeout_segundos_por_instancia / max(len(config.fatores_r), 1)))
         z_otimo_ttp, sol_opt, otimo_comprovado = resolver_ttp_exato_bb(
             instance, 
             taxa_r, 
-            timeout_s=config.timeout_segundos_por_instancia,
+            timeout_s=timeout_ponto,
             solucao_incumbente=melhor_incumbente
         )
     else:

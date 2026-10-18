@@ -98,3 +98,42 @@ def test_assign_items_to_cities(temp_instance_file):
     assert len(instance.grafo.cidades[1].itens) == 0
     assert len(instance.grafo.cidades[2].itens) == 1
     assert len(instance.grafo.cidades[3].itens) == 1
+
+def test_parse_ttp_benchmark_format():
+    content = """PROBLEM NAME: benchmark_test
+KNAPSACK DATA TYPE: bounded strongly corr
+DIMENSION: 3
+NUMBER OF ITEMS: 2
+CAPACITY OF KNAPSACK: 500
+MIN SPEED: 0.1
+MAX SPEED: 1.0
+RENTING RATIO: 200.5
+EDGE_WEIGHT_TYPE: CEIL_2D
+NODE_COORD_SECTION\t(INDEX, X, Y):
+1\t0.0\t0.0
+2\t3.2\t0.0
+3\t0.0\t4.1
+ITEMS SECTION\t(INDEX, PROFIT, WEIGHT, ASSIGNED NODE NUMBER):
+1\t100\t20\t2
+2\t200\t40\t3
+"""
+    fd, path = tempfile.mkstemp()
+    with open(fd, 'w', encoding='utf-8') as f:
+        f.write(content)
+    try:
+        instance = InstanceParser.carregar(path)
+        assert instance.nome == 'benchmark_test'
+        assert instance.dimension == 3
+        assert instance.num_items == 2
+        assert instance.grafo.edge_weight_type == 'CEIL_2D'
+        # dist(1, 2) sqrt(3.2^2) = 3.2 -> ceil is 4.0
+        assert instance.grafo.distancia(1, 2) == 4.0
+        # dist(1, 3) sqrt(4.1^2) = 4.1 -> ceil is 5.0
+        assert instance.grafo.distancia(1, 3) == 5.0
+        assert len(instance.itens) == 2
+        assert instance.itens[0].cidade_origem == 2
+        assert len(instance.grafo.cidades[2].itens) == 1
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
+

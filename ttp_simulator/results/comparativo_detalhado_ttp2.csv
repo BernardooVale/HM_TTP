@@ -1,0 +1,6 @@
+instancia;modelo;solver;lucro_liquido_G;tempo_viagem_f;peso_acumulado;qtd_itens;tempo_exec_ms
+instancia_01;TTP2;random;-44.0000;82.5529;80.0000;5;0.01
+instancia_01;TTP2;greedy;-44.0000;82.5529;80.0000;5;0.01
+instancia_01;TTP2;heuristic_37;67.0000;58.6318;55.0000;3;0.11
+instancia_01;TTP2;queimada;89.0000;62.2160;65.0000;2;0.15
+instancia_01;TTP2;pack_iterative;67.0000;58.6318;55.0000;3;0.15

@@ -1,0 +1,8 @@
+instancia,dimension,num_items,capacidade,r_nominal,r_crossover,r_max_gap,max_gap_valor,faixa_kp_09_min,faixa_kp_09_max,faixa_tsp_09_min,faixa_tsp_09_max,zona_forte_acoplamento_min,zona_forte_acoplamento_max,status_otimo,tempo_execucao_s
+Instancia02,4,5,50.0000,2.0000,0.0000,0.0000,0.0000,0.0000,20.0000,0.0000,200.0000,N/A,N/A,EXATO,0.01
+Instancia01,5,6,100.0000,1.5000,0.0000,3.0000,17.8450,0.0000,0.7500,0.0000,150.0000,1.1250,7.5000,EXATO,0.09
+cenario_pequeno_10c,10,20,304.6859,1.2000,0.0000,0.0000,0.0000,0.0000,0.3000,0.0000,120.0000,N/A,N/A,TIMEOUT_HEURISTICO,1.12
+cenario_cluster_15c,15,35,328.2827,2.5000,0.0000,0.0000,0.0000,0.0000,0.1250,0.0000,250.0000,N/A,N/A,TIMEOUT_HEURISTICO,2.05
+cenario_medio_20c,20,50,1223.9978,1.0000,0.1000,0.0000,0.0000,0.0000,0.2500,0.0000,100.0000,N/A,N/A,TIMEOUT_HEURISTICO,0.63
+cenario_cluster_25c,25,60,747.4128,1.8000,0.1800,0.0000,0.0000,0.0000,0.1800,0.0000,180.0000,N/A,N/A,TIMEOUT_HEURISTICO,0.88
+cenario_desafiador_30c,30,75,1250.9011,3.0000,0.1500,0.0000,0.0000,0.0000,0.3000,0.0000,300.0000,N/A,N/A,TIMEOUT_HEURISTICO,1.35

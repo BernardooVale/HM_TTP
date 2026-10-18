@@ -26,7 +26,11 @@ class AvaliacaoRConfig:
     
     # Limites computacionais para busca exata de problemas NP-difíceis
     # Dimensão máxima de cidades para executar B&B exato global do TTP completo
-    max_cidades_exato_ttp: int = 10
+    # (N <= 8: 7! = 5.040 permutações é viável em segundos; N=10 gera 362.880 permutações x 17 pontos de R)
+    max_cidades_exato_ttp: int = 8
+    
+    # Dimensão máxima de cidades para avaliação de R (evita alocação de matriz de 9GB para 33.810 cidades)
+    max_cidades_avaliacao: int = 5000
     
     # Timeout por instância em segundos (evita travamento em instâncias grandes)
     timeout_segundos_por_instancia: float = 120.0

@@ -30,7 +30,8 @@ class InstanceParser:
             line = lines[i]
             if (line.startswith('NODE_COORD_SECTION') or 
                 line.startswith('EDGE_WEIGHT_SECTION') or 
-                line.startswith('ITEMS_SECTION')):
+                line.startswith('ITEMS_SECTION') or
+                line.startswith('ITEMS SECTION')):
                 break
 
             if ':' in line:
@@ -63,7 +64,7 @@ class InstanceParser:
 
             if line.startswith('NODE_COORD_SECTION'):
                 i += 1
-                while i < len(lines) and not (lines[i].startswith('ITEMS_SECTION') or lines[i].startswith('EDGE_WEIGHT_SECTION')):
+                while i < len(lines) and not (lines[i].startswith('ITEMS_SECTION') or lines[i].startswith('ITEMS SECTION') or lines[i].startswith('EDGE_WEIGHT_SECTION')):
                     parts = lines[i].split()
                     if len(parts) >= 3 and parts[0].isdigit():
                         c_id = int(parts[0])
@@ -76,7 +77,7 @@ class InstanceParser:
             elif line.startswith('EDGE_WEIGHT_SECTION'):
                 i += 1
                 edge_lines = []
-                while i < len(lines) and not lines[i].startswith('ITEMS_SECTION') and not lines[i].startswith('NODE_COORD_SECTION'):
+                while i < len(lines) and not (lines[i].startswith('ITEMS_SECTION') or lines[i].startswith('ITEMS SECTION')) and not lines[i].startswith('NODE_COORD_SECTION'):
                     edge_lines.append(lines[i])
                     i += 1
                 
@@ -122,7 +123,7 @@ class InstanceParser:
                         cidades[cid] = Cidade(id=cid)
                 continue
 
-            elif line.startswith('ITEMS_SECTION'):
+            elif line.startswith('ITEMS_SECTION') or line.startswith('ITEMS SECTION'):
                 i += 1
                 while i < len(lines):
                     parts = lines[i].split()

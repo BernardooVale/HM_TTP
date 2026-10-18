@@ -10,58 +10,9 @@ IEEE Congress on Evolutionary Computation (CEC 2015).
 
 from typing import Dict, List, Optional, Set
 from src.core.models import TTPInstance, SolucaoTTP, Item
+from src.core.fast_evaluator import FastTTPEvaluator
 from src.solvers.base import BaseSolver, SolverRegistry
 from src.solvers.heuristic_37 import obter_melhor_rota_tsp
-
-
-class FastTTPEvaluator:
-    """
-    Avaliador otimizado de soluções TTP1 para uma rota fixa.
-    Evita alocações redundantes de dicionários durante buscas locais de empacotamento.
-    """
-
-    def __init__(self, instance: TTPInstance, rota: List[int]):
-        self.instance = instance
-        self.rota = list(rota)
-        self.n = len(self.rota)
-        self.cidade_idx = {self.rota[i]: i for i in range(self.n)}
-        self.itens_by_id = {it.id: it for it in instance.itens}
-
-        # Distâncias fixas das pernas da rota
-        self.distancias = [
-            instance.grafo.distancia(self.rota[i], self.rota[(i + 1) % self.n])
-            for i in range(self.n)
-        ]
-
-        self.cap_mochila = max(instance.capacidade_mochila, 1e-6)
-        self.v_min = instance.v_min
-        self.v_max = instance.v_max
-        self.taxa_aluguel = instance.taxa_aluguel
-        self.fator_velocidade = (self.v_max - self.v_min) / self.cap_mochila
-
-    def calcular_lucro(self, itens_coletados_ids: Set[int]) -> float:
-        """Calcula o lucro líquido G = valor_bruto - taxa_aluguel * tempo_viagem."""
-        peso_por_cidade = [0.0] * self.n
-        valor_bruto = 0.0
-
-        for it_id in itens_coletados_ids:
-            it = self.itens_by_id[it_id]
-            idx = self.cidade_idx.get(it.cidade_origem)
-            if idx is not None:
-                peso_por_cidade[idx] += it.peso
-                valor_bruto += it.valor
-
-        peso_acc = 0.0
-        tempo_viagem = 0.0
-
-        for i in range(self.n):
-            peso_acc += peso_por_cidade[i]
-            vel = self.v_max - peso_acc * self.fator_velocidade
-            if vel < self.v_min:
-                vel = self.v_min
-            tempo_viagem += self.distancias[i] / vel
-
-        return valor_bruto - self.taxa_aluguel * tempo_viagem
 
 
 def refinar_plano_coleta(
@@ -69,6 +20,7 @@ def refinar_plano_coleta(
     rota: List[int],
     plano_coleta: Dict[int, List[int]],
     max_iter: int = 50,
+    modelo: str = "TTP1",
 ) -> Dict[int, List[int]]:
     """
     Busca local 1-bit-flip (Drop & Add / PackIterative refinement).
@@ -76,9 +28,9 @@ def refinar_plano_coleta(
     1. Fase DROP: Remove qualquer item da mochila cujo lucro marginal líquido seja negativo
        (ou seja, cuja remoção estritamente aumente o objetivo G).
     2. Fase ADD: Insere itens que caibam na capacidade restante e tragam ganho líquido estritamente positivo.
-    3. Itera até convergência ou atingir max_iter.
+    3. Itera até convergência ou atingir max_iter. Suporta TTP1 e TTP2.
     """
-    evaluator = FastTTPEvaluator(instance, rota)
+    evaluator = FastTTPEvaluator(instance, rota, modelo=modelo)
     itens_by_id = {it.id: it for it in instance.itens}
 
     itens_coletados: Set[int] = set()
@@ -161,6 +113,7 @@ def resolver_pack_iterative(
     instance: TTPInstance,
     rota: List[int],
     max_refinamento_iter: int = 50,
+    modelo: str = "TTP1",
 ) -> Dict[int, List[int]]:
     """
     Algoritmo PackIterative (Faulkner et al., 2015).
@@ -183,7 +136,7 @@ def resolver_pack_iterative(
         reverse=True,
     )
 
-    evaluator = FastTTPEvaluator(instance, rota)
+    evaluator = FastTTPEvaluator(instance, rota, modelo=modelo)
     itens_coletados: Set[int] = set()
     peso_atual = 0.0
     obj_atual = evaluator.calcular_lucro(itens_coletados)
@@ -209,7 +162,9 @@ def resolver_pack_iterative(
         plano_inicial[it.cidade_origem].append(it_id)
 
     # Refinamento Drop & Add
-    return refinar_plano_coleta(instance, rota, plano_inicial, max_iter=max_refinamento_iter)
+    return refinar_plano_coleta(
+        instance, rota, plano_inicial, max_iter=max_refinamento_iter, modelo=modelo
+    )
 
 
 @SolverRegistry.register
@@ -218,7 +173,8 @@ class PackIterativeSolver(BaseSolver):
     Solucionador PackIterative para o TTP (Faulkner et al., 2015).
     """
 
-    def __init__(self, nome: Optional[str] = None):
+    def __init__(self, modelo: str = "TTP1", nome: Optional[str] = None):
+        self.modelo = modelo
         self._nome = nome or "pack_iterative"
 
     @property
@@ -227,5 +183,6 @@ class PackIterativeSolver(BaseSolver):
 
     def solve(self, instance: TTPInstance) -> SolucaoTTP:
         rota = obter_melhor_rota_tsp(instance.grafo)
-        plano_coleta = resolver_pack_iterative(instance, rota)
+        plano_coleta = resolver_pack_iterative(instance, rota, modelo=self.modelo)
         return SolucaoTTP(rota=rota, plano_coleta=plano_coleta)
+

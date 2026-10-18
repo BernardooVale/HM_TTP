@@ -67,10 +67,12 @@ def sample_instance():
     )
 
 @pytest.mark.parametrize("solver_name", [
-    "random", "greedy", "heuristic_37", "heuristic_37_refinada", "local_search", "queimada",
-    "queimada_adj", "queimada_bfs", "queimada_inicio", "queimada_kp",
-    "queimada_exact", "queimada_kruskal", "queimada_reversa", "queimada_refinada",
-    "queimada_reversa_refinada", "queimada_legacy", "pack_iterative", "cosolver",
+    "random", "greedy", "heuristic_37", "heuristic_37_refinada", "heuristic_37_simetrica",
+    "heuristic_37_ttp2", "local_search", "queimada", "queimada_adj", "queimada_bfs",
+    "queimada_inicio", "queimada_kp", "queimada_exact", "queimada_kruskal",
+    "queimada_reversa", "queimada_refinada", "queimada_reversa_refinada", "queimada_legacy",
+    "queimada_com_2opt", "queimada_sem_2opt", "queimada_com_afinidade", "queimada_sem_afinidade",
+    "queimada_regime_r", "queimada_ttp2", "pack_iterative", "cosolver",
     "s2_heuristic", "s2_refinada", "s5_heuristic", "s5_refinada"
 ])
 def test_registered_solvers_produce_valid_solution(solver_name, sample_instance):

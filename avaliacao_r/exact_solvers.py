@@ -77,16 +77,25 @@ def resolver_kp_exato(itens: List[Item], capacidade: float) -> Tuple[float, floa
                 break
         return bound_v
 
+    # Limite de segurança para profundidade e nós de B&B (evita estouro de recursão e travamento em N grande)
+    max_bb_items = min(n, 35)
+    limite_nos = 50000
+    nos_visitados = 0
+    t0 = time.time()
+
     # Busca em profundidade com poda
     def branch_and_bound(idx: int, current_w: float, current_v: float, selected: List[int]):
-        nonlocal best_valor, best_peso, best_selection
-        
+        nonlocal best_valor, best_peso, best_selection, nos_visitados
+        nos_visitados += 1
+        if nos_visitados > limite_nos or (nos_visitados % 2000 == 0 and time.time() - t0 > 2.0):
+            return
+
         if current_v > best_valor:
             best_valor = current_v
             best_peso = current_w
             best_selection = list(selected)
             
-        if idx >= n:
+        if idx >= max_bb_items:
             return
             
         # Poda por limitante superior
@@ -474,9 +483,9 @@ def resolver_packing_exato_rota_fixa(
                 best_z = z_cand
                 best_itens = list(greedy_candidates)
 
-    # Se m for muito grande (> 25), o Branch & Bound completo pode demorar;
+    # Se m for muito grande (> 20), o Branch & Bound completo pode demorar;
     # limitamos a profundidade ou usamos janela deslizante
-    limite_itens = min(m, 22)
+    limite_itens = min(m, 18)
     itens_para_bb = sorted_itens[:limite_itens]
     
     # Vetor de lucros acumulados restantes para limitante
@@ -486,10 +495,15 @@ def resolver_packing_exato_rota_fixa(
         
     # Tempo mínimo absoluto da rota vazia
     t_min_vazio = sum(d / v_max for d in pernas_dist)
+    nos_bb = 0
+    t0_bb = time.time()
 
     def bb(idx: int, current_w: float, current_v: float, current_list: List[Item]):
-        nonlocal best_z, best_itens
-        
+        nonlocal best_z, best_itens, nos_bb
+        nos_bb += 1
+        if nos_bb > 20000 or (nos_bb % 1000 == 0 and time.time() - t0_bb > 1.0):
+            return
+            
         # Avalia a solução atual
         z_curr, _, _ = avaliar_subset(current_list)
         if z_curr > best_z:
@@ -582,6 +596,7 @@ def resolver_ttp_exato_bb(
     dist = [[instance.grafo.distancia(cidade_ids[i], cidade_ids[j]) for j in range(n)] for i in range(n)]
     
     otimo_comprovado = True
+    timed_out = False
     
     # Busca de permutações começando no nó 0 (cidade 1)
     visited = [False] * n
@@ -589,10 +604,14 @@ def resolver_ttp_exato_bb(
     current_perm = [0]
 
     def branch(depth: int, current_d: float):
-        nonlocal best_z, best_sol, otimo_comprovado
+        nonlocal best_z, best_sol, otimo_comprovado, timed_out
         
+        if timed_out:
+            return
+            
         if time.time() - start_time > timeout_s:
             otimo_comprovado = False
+            timed_out = True
             return
             
         if depth == n:
@@ -600,8 +619,6 @@ def resolver_ttp_exato_bb(
             tour_d = current_d + dist[current_perm[-1]][0]
             
             # Poda Superior de Rota:
-            # Mesmo que o ladrão coletasse TODOS os itens da mochila ótima,
-            # o tempo mínimo na rota tour_d seria tour_d / v_max.
             ub_tour = kp_opt_valor - taxa_r * (tour_d / instance.v_max)
             if ub_tour <= best_z:
                 return
@@ -615,21 +632,20 @@ def resolver_ttp_exato_bb(
             return
 
         # Poda de subcaminho:
-        # Distância mínima estimada restante = menor aresta saindo dos nós não visitados
         ub_parcial = kp_opt_valor - taxa_r * (current_d / instance.v_max)
         if ub_parcial <= best_z:
             return
             
         last = current_perm[-1]
         for nxt in range(1, n):
+            if timed_out:
+                break
             if not visited[nxt]:
                 visited[nxt] = True
                 current_perm.append(nxt)
                 branch(depth + 1, current_d + dist[last][nxt])
                 current_perm.pop()
                 visited[nxt] = False
-                if not otimo_comprovado and time.time() - start_time > timeout_s:
-                    break
 
     branch(1, 0.0)
     return best_z, best_sol, otimo_comprovado

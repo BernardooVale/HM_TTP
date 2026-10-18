@@ -24,11 +24,18 @@ def obter_instancias_ja_calculadas(config: AvaliacaoRConfig) -> Set[str]:
     pasta_detalhes = config.diretorio_resultados / "detalhes"
     if pasta_detalhes.exists():
         for arq in pasta_detalhes.glob("*.json"):
+            # Adiciona o stem do arquivo
+            calculadas.add(arq.stem)
+            calculadas.add(arq.stem.lower())
+            calculadas.add(arq.stem.lower().replace("_", "").replace("-", ""))
             try:
                 with open(arq, 'r', encoding='utf-8') as f:
                     dados = json.load(f)
-                    if "instancia_nome" in dados:
-                        calculadas.add(dados["instancia_nome"])
+                    nome = dados.get("instancia_nome")
+                    if nome:
+                        calculadas.add(nome)
+                        calculadas.add(nome.lower())
+                        calculadas.add(nome.lower().replace("_", "").replace("-", ""))
             except Exception:
                 # Se o arquivo estiver corrompido, ignora para reprocessar
                 continue

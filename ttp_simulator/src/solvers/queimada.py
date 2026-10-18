@@ -114,6 +114,11 @@ class QueimadaSolver(BaseSolver):
         metodo_construcao: str = "kruskal",
         ordem_selecao: str = "densidade",
         refinamento: bool = True,
+        refinamento_rota: bool = True,
+        afinidade_termica: bool = True,
+        gamma_afinidade: float = 1.0,
+        adaptar_regime_r: bool = False,
+        modelo: str = "TTP1",
         nome: Optional[str] = None,
     ):
         """
@@ -124,7 +129,12 @@ class QueimadaSolver(BaseSolver):
         - selecao: 'greedy_relative', 'knapsack_relative' (padrão ótimo: 'greedy_relative')
         - metodo_construcao: 'walk', 'kruskal' (padrão ótimo: 'kruskal')
         - ordem_selecao: 'densidade', 'reversa', 'sequencial' (padrão ótimo: 'densidade')
-        - refinamento: se True, executa busca local Drop & Add no plano de empacotamento final (padrão ótimo: True)
+        - refinamento: se True, executa busca local Drop & Add no empacotamento (padrão: True)
+        - refinamento_rota: se True, executa busca local 2-opt para desatar cruzamentos da rota (padrão: True)
+        - afinidade_termica: se True, Kruskal prioriza arestas por calor/distância^gamma (padrão: True)
+        - gamma_afinidade: expoente de penalização de distância na afinidade térmica (padrão: 1.0)
+        - adaptar_regime_r: se True, ajusta dinamicamente a afinidade ao valor de R da instância (padrão: False)
+        - modelo: 'TTP1' (aluguel de viagem) ou 'TTP2' (degradação temporal) (padrão: 'TTP1')
         """
         self.temperatura_modo = temperatura
         self.dissipacao_modo = dissipacao
@@ -133,6 +143,11 @@ class QueimadaSolver(BaseSolver):
         self.metodo_construcao = metodo_construcao
         self.ordem_selecao = ordem_selecao
         self.refinamento = refinamento
+        self.refinamento_rota = refinamento_rota
+        self.afinidade_termica = afinidade_termica
+        self.gamma_afinidade = gamma_afinidade
+        self.adaptar_regime_r = adaptar_regime_r
+        self.modelo = modelo
         self._nome = nome or "queimada"
 
     @property
@@ -166,31 +181,42 @@ class QueimadaSolver(BaseSolver):
         self, instance: TTPInstance, temperaturas: Dict[int, float]
     ) -> Dict[Tuple[int, int], float]:
         """
-        Dissipa o calor dos vértices pelas arestas do grafo.
+        Dissipa o calor dos vértices pelas arestas do grafo em alta performance.
         Retorna dicionário (min(u, v), max(u, v)) -> calor acumulado na aresta.
         """
         cidades = list(instance.grafo.cidades.keys())
         n = len(cidades)
 
-        arestas: Set[Tuple[int, int]] = set()
-        for i in range(n):
-            for j in range(i + 1, n):
-                u, v = cidades[i], cidades[j]
-                arestas.add((min(u, v), max(u, v)))
-
-        calor: Dict[Tuple[int, int], float] = {e: 0.0 for e in arestas}
+        calor: Dict[Tuple[int, int], float] = {}
 
         if self.dissipacao_modo == "adjacent_only":
-            for s in cidades:
-                t_s = temperaturas.get(s, 0.0)
-                if t_s <= 0.0:
-                    continue
-                for u in cidades:
-                    if u == s:
-                        continue
-                    d = instance.grafo.distancia(s, u)
-                    e = (min(s, u), max(s, u))
-                    calor[e] += t_s / max(d, 0.001)
+            for i in range(n):
+                u = cidades[i]
+                tu = temperaturas.get(u, 0.0)
+                for j in range(i + 1, n):
+                    v = cidades[j]
+                    tv = temperaturas.get(v, 0.0)
+                    e = (u, v) if u < v else (v, u)
+                    if tu > 0.0 or tv > 0.0:
+                        d = instance.grafo.distancia(u, v)
+                        calor[e] = (tu + tv) / max(d, 0.001)
+                    else:
+                        calor[e] = 0.0
+
+        elif self.dissipacao_modo == "bfs":
+            # Forma fechada exata O(N^2) para grafo completo:
+            # Para cada nó s, level[s]=0 e level[v]=1 para todo v != s.
+            # h = 1 para s in {u, v} e h = 2 para s not in {u, v}.
+            T_total = sum(temperaturas.values())
+            for i in range(n):
+                u = cidades[i]
+                tu = temperaturas.get(u, 0.0)
+                for j in range(i + 1, n):
+                    v = cidades[j]
+                    tv = temperaturas.get(v, 0.0)
+                    d = instance.grafo.distancia(u, v)
+                    e = (u, v) if u < v else (v, u)
+                    calor[e] = (tu + tv + T_total) / (2.0 * (1.0 + d))
 
         elif self.dissipacao_modo == "dijkstra":
             for s in cidades:
@@ -213,34 +239,13 @@ class QueimadaSolver(BaseSolver):
                             dist[v] = dist[u] + w
                             heapq.heappush(pq, (dist[v], v))
 
-                for u, v in arestas:
-                    # Distância de s até a aresta (u, v) considerando o ponto médio
-                    d_edge = min(dist[u], dist[v]) + instance.grafo.distancia(u, v) / 2.0
-                    calor[(u, v)] += t_s / (1.0 + d_edge)
-
-        elif self.dissipacao_modo == "bfs":
-            for s in cidades:
-                t_s = temperaturas.get(s, 0.0)
-                if t_s <= 0.0:
-                    continue
-
-                level = {c: -1 for c in cidades}
-                level[s] = 0
-                queue = deque([s])
-                while queue:
-                    u = queue.popleft()
-                    for v in cidades:
-                        if v == u:
-                            continue
-                        if level[v] == -1:
-                            level[v] = level[u] + 1
-                            queue.append(v)
-
-                for u, v in arestas:
-                    h = min(level[u], level[v]) + 1
-                    d = instance.grafo.distancia(u, v)
-                    calor[(u, v)] += t_s / (h * (1.0 + d))
-
+                for i in range(n):
+                    u = cidades[i]
+                    for j in range(i + 1, n):
+                        v = cidades[j]
+                        e = (u, v) if u < v else (v, u)
+                        d_edge = min(dist[u], dist[v]) + instance.grafo.distancia(u, v) / 2.0
+                        calor[e] = calor.get(e, 0.0) + t_s / (1.0 + d_edge)
         else:
             raise ValueError(f"Modo de dissipação inválido: {self.dissipacao_modo}")
 
@@ -288,8 +293,22 @@ class QueimadaSolver(BaseSolver):
             return rota
 
         elif self.metodo_construcao == "kruskal":
-            # Kruskal para formar ciclo TSP usando arestas de maior calor
-            arestas_ordenadas = sorted(calor.keys(), key=lambda e: calor[e], reverse=True)
+            # Ordenação de arestas: puramente por calor ou por afinidade térmica
+            if self.afinidade_termica:
+                gamma = self.gamma_afinidade
+                if self.adaptar_regime_r and self.modelo == "TTP1":
+                    # Modula gamma em função de R da instância:
+                    gamma = min(2.5, max(0.5, 0.5 + instance.taxa_aluguel / 2.0))
+
+                def score_aresta(e: Tuple[int, int]) -> float:
+                    d = max(instance.grafo.distancia(e[0], e[1]), 0.001)
+                    return calor[e] / (d ** gamma)
+
+                arestas_ordenadas = sorted(calor.keys(), key=score_aresta, reverse=True)
+            else:
+                # Kruskal clássico sem afinidade térmica (puramente pelo calor)
+                arestas_ordenadas = sorted(calor.keys(), key=lambda e: calor[e], reverse=True)
+
             adj: Dict[int, List[int]] = {c: [] for c in cidades}
             parent = {c: c for c in cidades}
 
@@ -322,21 +341,40 @@ class QueimadaSolver(BaseSolver):
                 rota.append(prox)
                 ant = atual
                 atual = prox
-
-            # Duas orientações do ciclo (horário e anti-horário)
-            rota_rev = [1] + list(reversed(rota[1:]))
-
-            # Avalia a concentração de calor ao longo da rota
-            score_rota = sum(i * temperaturas.get(rota[i], 0.0) for i in range(n))
-            score_rev = sum(i * temperaturas.get(rota_rev[i], 0.0) for i in range(n))
-
-            if self.direcao_modo == "calor_final":
-                return rota if score_rota >= score_rev else rota_rev
-            else:
-                return rota if score_rota <= score_rev else rota_rev
-
         else:
             raise ValueError(f"Método de construção inválido: {self.metodo_construcao}")
+
+        # Refinamento de rota via 2-opt (se ativado)
+        if self.refinamento_rota and n > 3:
+            melhor_rota = list(rota)
+            melhorou = True
+            while melhorou:
+                melhorou = False
+                for i in range(1, n - 1):
+                    for j in range(i + 1, n):
+                        u1, v1 = melhor_rota[i - 1], melhor_rota[i]
+                        u2, v2 = melhor_rota[j], melhor_rota[(j + 1) % n]
+                        d_atual = instance.grafo.distancia(u1, v1) + instance.grafo.distancia(u2, v2)
+                        d_nova = instance.grafo.distancia(u1, u2) + instance.grafo.distancia(v1, v2)
+                        if d_nova < d_atual - 1e-6:
+                            melhor_rota[i : j + 1] = reversed(melhor_rota[i : j + 1])
+                            melhorou = True
+                            break
+                    if melhorou:
+                        break
+            rota = melhor_rota
+
+        # Duas orientações do ciclo (horário e anti-horário)
+        rota_rev = [1] + list(reversed(rota[1:]))
+
+        # Avalia a concentração de calor ao longo da rota
+        score_rota = sum(i * temperaturas.get(rota[i], 0.0) for i in range(n))
+        score_rev = sum(i * temperaturas.get(rota_rev[i], 0.0) for i in range(n))
+
+        if self.direcao_modo == "calor_final":
+            return rota if score_rota >= score_rev else rota_rev
+        else:
+            return rota if score_rota <= score_rev else rota_rev
 
     def _selecionar_itens(
         self, instance: TTPInstance, rota: List[int]
@@ -353,6 +391,7 @@ class QueimadaSolver(BaseSolver):
 
         v_avg = (instance.v_max + instance.v_min) / 2.0
         cap_mochila = max(instance.capacidade_mochila, 1e-6)
+        const_deg = max(instance.constante_degradacao, 1e-6)
 
         # Cálculo do lucro líquido estimado para cada item
         itens_com_lucro: List[Tuple[float, Item]] = []
@@ -360,13 +399,27 @@ class QueimadaSolver(BaseSolver):
             if item.peso <= 0:
                 continue
             d_rest = dist_restante.get(item.cidade_origem, 0.0)
-            custo_transporte = (
-                instance.taxa_aluguel
-                * d_rest
-                * ((instance.v_max - instance.v_min) / (cap_mochila * (v_avg ** 2)))
-                * item.peso
-            )
-            lucro_liquido = item.valor - custo_transporte
+
+            if self.modelo == "TTP2":
+                # TTP2: degradação temporal do valor
+                v_depois = max(
+                    instance.v_min,
+                    instance.v_max
+                    - item.peso * ((instance.v_max - instance.v_min) / cap_mochila),
+                )
+                tempo_restante = d_rest / v_depois
+                degradacao = math.ceil(tempo_restante / const_deg)
+                lucro_liquido = item.valor - degradacao
+            else:
+                # TTP1: custo de aluguel por atraso
+                custo_transporte = (
+                    instance.taxa_aluguel
+                    * d_rest
+                    * ((instance.v_max - instance.v_min) / (cap_mochila * (v_avg ** 2)))
+                    * item.peso
+                )
+                lucro_liquido = item.valor - custo_transporte
+
             if lucro_liquido > 0:
                 itens_com_lucro.append((lucro_liquido, item))
 
@@ -374,7 +427,6 @@ class QueimadaSolver(BaseSolver):
 
         if self.selecao_modo == "greedy_relative":
             if self.ordem_selecao == "densidade":
-                # Ordena por densidade de lucro líquido (lucro_liquido / peso)
                 itens_com_lucro.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
                 peso_atual = 0.0
                 for _, item in itens_com_lucro:
@@ -384,7 +436,6 @@ class QueimadaSolver(BaseSolver):
                             plano_coleta[item.cidade_origem] = []
                         plano_coleta[item.cidade_origem].append(item.id)
             elif self.ordem_selecao == "reversa":
-                # Visita as cidades de trás para frente na rota (do fim ao início)
                 cidades_reversas = [c for c in reversed(rota) if c != 1]
                 peso_atual = 0.0
                 for cid in cidades_reversas:
@@ -397,7 +448,6 @@ class QueimadaSolver(BaseSolver):
                                 plano_coleta[cid] = []
                             plano_coleta[cid].append(item.id)
             elif self.ordem_selecao == "sequencial":
-                # Visita as cidades na ordem sequencial direta da rota
                 cidades_seq = [c for c in rota if c != 1]
                 peso_atual = 0.0
                 for cid in cidades_seq:
@@ -413,7 +463,6 @@ class QueimadaSolver(BaseSolver):
                 raise ValueError(f"Ordem de seleção de cidades inválida: {self.ordem_selecao}")
 
         elif self.selecao_modo == "knapsack_relative":
-            # Constrói itens com valor ajustado para o KP exato
             itens_adaptados = [
                 Item(id=it.id, peso=it.peso, valor=lucro, cidade_origem=it.cidade_origem)
                 for lucro, it in itens_com_lucro
@@ -431,7 +480,9 @@ class QueimadaSolver(BaseSolver):
 
         if self.refinamento:
             from src.solvers.pack_iterative import refinar_plano_coleta
-            plano_coleta = refinar_plano_coleta(instance, rota, plano_coleta)
+            plano_coleta = refinar_plano_coleta(
+                instance, rota, plano_coleta, modelo=self.modelo
+            )
 
         return plano_coleta
 
@@ -451,7 +502,49 @@ class QueimadaSolver(BaseSolver):
         return SolucaoTTP(rota=rota, plano_coleta=plano_coleta)
 
 
-# Registro de variações convenientes para execução via CLI
+# Registro de variações convenientes para execução via CLI e comparações
+SolverRegistry.register(
+    type(
+        "QueimadaCom2OptSolver",
+        (QueimadaSolver,),
+        {"nome": "queimada_com_2opt", "__init__": lambda self: QueimadaSolver.__init__(self, refinamento_rota=True, nome="queimada_com_2opt")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaSem2OptSolver",
+        (QueimadaSolver,),
+        {"nome": "queimada_sem_2opt", "__init__": lambda self: QueimadaSolver.__init__(self, refinamento_rota=False, nome="queimada_sem_2opt")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaComAfinidadeSolver",
+        (QueimadaSolver,),
+        {"nome": "queimada_com_afinidade", "__init__": lambda self: QueimadaSolver.__init__(self, afinidade_termica=True, nome="queimada_com_afinidade")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaSemAfinidadeSolver",
+        (QueimadaSolver,),
+        {"nome": "queimada_sem_afinidade", "__init__": lambda self: QueimadaSolver.__init__(self, afinidade_termica=False, nome="queimada_sem_afinidade")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaRegimeRSolver",
+        (QueimadaSolver,),
+        {"nome": "queimada_regime_r", "__init__": lambda self: QueimadaSolver.__init__(self, adaptar_regime_r=True, afinidade_termica=True, nome="queimada_regime_r")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaTTP2Solver",
+        (QueimadaSolver,),
+        {"nome": "queimada_ttp2", "__init__": lambda self: QueimadaSolver.__init__(self, modelo="TTP2", nome="queimada_ttp2")},
+    )
+)
 SolverRegistry.register(
     type(
         "QueimadaAdjSolver",
@@ -491,7 +584,7 @@ SolverRegistry.register(
     type(
         "QueimadaKruskalSolver",
         (QueimadaSolver,),
-        {"nome": "queimada_kruskal", "__init__": lambda self: QueimadaSolver.__init__(self, metodo_construcao="kruskal", nome="queimada_kruskal")},
+        {"nome": "queimada_kruskal", "__init__": lambda self: QueimadaSolver.__init__(self, metodo_construcao="kruskal", afinidade_termica=False, refinamento_rota=False, nome="queimada_kruskal")},
     )
 )
 SolverRegistry.register(
@@ -530,6 +623,8 @@ SolverRegistry.register(
                 metodo_construcao="walk",
                 ordem_selecao="densidade",
                 refinamento=False,
+                refinamento_rota=False,
+                afinidade_termica=False,
                 nome="queimada_legacy",
             ),
         },
