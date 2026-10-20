@@ -182,3 +182,7 @@ cython_debug/
 
 PLANO_EXECUCAO.md
 PROGRESS.md
+
+# Notebooks
+/notebooks/
+pyproject.toml
