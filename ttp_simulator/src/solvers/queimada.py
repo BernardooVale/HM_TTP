@@ -127,7 +127,7 @@ class QueimadaSolver(BaseSolver):
         - dissipacao: 'adjacent_only', 'dijkstra', 'bfs' (padrão ótimo: 'bfs')
         - direcao: 'calor_final' (maior calor no final da rota), 'calor_inicio' (padrão ótimo: 'calor_final')
         - selecao: 'greedy_relative', 'knapsack_relative' (padrão ótimo: 'greedy_relative')
-        - metodo_construcao: 'walk', 'kruskal' (padrão ótimo: 'kruskal')
+        - metodo_construcao: 'walk', 'kruskal', 'backward_edges' (padrão ótimo: 'kruskal')
         - ordem_selecao: 'densidade', 'reversa', 'sequencial' (padrão ótimo: 'densidade')
         - refinamento: se True, executa busca local Drop & Add no empacotamento (padrão: True)
         - refinamento_rota: se True, executa busca local 2-opt para desatar cruzamentos da rota (padrão: True)
@@ -341,6 +341,35 @@ class QueimadaSolver(BaseSolver):
                 rota.append(prox)
                 ant = atual
                 atual = prox
+        elif self.metodo_construcao == "backward_edges":
+            # Construção regressiva de trás para frente a partir da Cidade 1
+            # Prioriza encadear as arestas de maior calor relativo/afinidade na cauda do percurso.
+            gamma = self.gamma_afinidade
+            if self.adaptar_regime_r and self.modelo == "TTP1":
+                gamma = min(2.5, max(0.5, 0.5 + instance.taxa_aluguel / 2.0))
+
+            def score_aresta_backward(u_node: int, v_node: int) -> float:
+                e_key = (min(u_node, v_node), max(u_node, v_node))
+                c_val = calor.get(e_key, 0.0)
+                if self.afinidade_termica:
+                    d_val = max(instance.grafo.distancia(u_node, v_node), 0.001)
+                    return c_val / (d_val ** gamma)
+                return c_val
+
+            nao_visitadas = set(cidades)
+            nao_visitadas.remove(1)
+
+            cadeia_reversa = [1]
+            atual = 1
+
+            while nao_visitadas:
+                prox = max(nao_visitadas, key=lambda v_cand: score_aresta_backward(atual, v_cand))
+                cadeia_reversa.append(prox)
+                nao_visitadas.remove(prox)
+                atual = prox
+
+            # Rota direta: as arestas adicionadas primeiro na cadeia reversa ficam no final da rota!
+            rota = [1] + list(reversed(cadeia_reversa[1:]))
         else:
             raise ValueError(f"Método de construção inválido: {self.metodo_construcao}")
 
@@ -367,9 +396,20 @@ class QueimadaSolver(BaseSolver):
         # Duas orientações do ciclo (horário e anti-horário)
         rota_rev = [1] + list(reversed(rota[1:]))
 
-        # Avalia a concentração de calor ao longo da rota
-        score_rota = sum(i * temperaturas.get(rota[i], 0.0) for i in range(n))
-        score_rev = sum(i * temperaturas.get(rota_rev[i], 0.0) for i in range(n))
+        if self.metodo_construcao == "backward_edges":
+            # Para backward_edges, avalia a concentração de calor nas ARESTAS
+            score_rota = sum(
+                calor.get((min(rota[i], rota[(i + 1) % n]), max(rota[i], rota[(i + 1) % n])), 0.0) * i
+                for i in range(n)
+            )
+            score_rev = sum(
+                calor.get((min(rota_rev[i], rota_rev[(i + 1) % n]), max(rota_rev[i], rota_rev[(i + 1) % n])), 0.0) * i
+                for i in range(n)
+            )
+        else:
+            # Avalia a concentração de calor ao longo da rota
+            score_rota = sum(i * temperaturas.get(rota[i], 0.0) for i in range(n))
+            score_rev = sum(i * temperaturas.get(rota_rev[i], 0.0) for i in range(n))
 
         if self.direcao_modo == "calor_final":
             return rota if score_rota >= score_rev else rota_rev
@@ -626,6 +666,35 @@ SolverRegistry.register(
                 refinamento_rota=False,
                 afinidade_termica=False,
                 nome="queimada_legacy",
+            ),
+        },
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaBackwardArestasSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_backward_arestas",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                metodo_construcao="backward_edges",
+                nome="queimada_backward_arestas",
+            ),
+        },
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaBackwardSem2optSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_backward_sem_2opt",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                metodo_construcao="backward_edges",
+                refinamento_rota=False,
+                nome="queimada_backward_sem_2opt",
             ),
         },
     )

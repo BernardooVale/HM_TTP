@@ -1,8 +1,0 @@
-id_execucao,timestamp,arquivo_instancia,modelo_ttp,solucionador,seed,tempo_computacional_seg,lucro_liquido_G,tempo_viagem_f,valor_bruto_itens_g,peso_acumulado_mochila,capacidade_mochila_W,pct_ocupacao_mochila,qtd_itens_coletados,total_itens_instancia,qtd_cidades
-3189f74a,2026-10-16T01:03:04.237272,bateria_testes/instancia_01.txt,TTP1,heuristic_37,42,4.1e-05,-66.2132,44.1421,0.0,0.0,100.0,0.0,0,6,5
-de926e9c,2026-10-16T01:03:16.662625,bateria_testes/instancia_01.txt,TTP1,greedy,42,3.7e-05,76.1707,82.5529,200.0,80.0,100.0,80.0,5,6,5
-7527f08e,2026-10-16T01:03:34.859089,bateria_testes/instancia_02.txt,TTP1,heuristic_37,42,2.9e-05,-180.0,90.0,0.0,0.0,50.0,0.0,0,5,4
-42e39354,2026-10-16T01:09:30.204394,bateria_testes/instancia_01.txt,TTP1,heuristic_37,42,0.000163,76.5527,68.9649,180.0,70.0,100.0,70.0,4,6,5
-d7fd2cd4,2026-10-16T01:09:38.149411,bateria_testes/instancia_02.txt,TTP1,heuristic_37,42,8.3e-05,213.8462,108.0769,430.0,50.0,50.0,100.0,4,5,4
-a63c8f83,2026-10-16T01:11:19.300059,bateria_testes/instancia_01.txt,TTP1,queimada,42,0.000172,48.7231,127.5179,240.0,100.0,100.0,100.0,5,6,5
-b9a038d1,2026-10-16T01:11:31.134759,bateria_testes/instancia_02.txt,TTP1,queimada,42,9.2e-05,278.601,110.6995,500.0,47.0,50.0,94.0,4,5,4

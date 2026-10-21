@@ -72,7 +72,8 @@ def sample_instance():
     "queimada_inicio", "queimada_kp", "queimada_exact", "queimada_kruskal",
     "queimada_reversa", "queimada_refinada", "queimada_reversa_refinada", "queimada_legacy",
     "queimada_com_2opt", "queimada_sem_2opt", "queimada_com_afinidade", "queimada_sem_afinidade",
-    "queimada_regime_r", "queimada_ttp2", "pack_iterative", "cosolver",
+    "queimada_regime_r", "queimada_ttp2", "queimada_backward_arestas", "queimada_backward_sem_2opt",
+    "pack_iterative", "cosolver",
     "s2_heuristic", "s2_refinada", "s5_heuristic", "s5_refinada"
 ])
 def test_registered_solvers_produce_valid_solution(solver_name, sample_instance):
