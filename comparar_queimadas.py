@@ -56,9 +56,10 @@ def comparar(instancias_nomes=None, modelo="TTP1"):
 
     solvers_alvo = [
         "queimada",
-        "queimada_inicio",
         "queimada_backward_arestas",
+        "queimada_backward_buracos",
         "queimada_backward_sem_2opt",
+        "queimada_backward_sem_2opt_buracos",
         "heuristic_37_refinada",
         "pack_iterative",
     ]

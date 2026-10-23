@@ -112,6 +112,12 @@ def executar_bateria(
         "queimada_regime_r",
         "queimada_reversa",
         "queimada_legacy",
+        "queimada_com_buracos",
+        "queimada_sem_2opt_buracos",
+        "queimada_backward_arestas",
+        "queimada_backward_buracos",
+        "queimada_backward_sem_2opt",
+        "queimada_backward_sem_2opt_buracos",
         # Estado da Arte da Literatura
         "s2_heuristic",
         "s5_heuristic",

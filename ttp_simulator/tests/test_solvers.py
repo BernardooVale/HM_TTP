@@ -121,3 +121,25 @@ def test_queimada_all_variations(temp, diss, direcao, selecao, sample_instance):
     )
     assert peso_total <= sample_instance.capacidade_mochila
 
+
+def test_queimada_otimizar_buracos(sample_instance):
+    from src.solvers.queimada import QueimadaSolver, otimizar_trechos_vazios
+    
+    # Rota intencionalmente com cruzamento em cidades vazias
+    rota = [1, 4, 3, 2] # Cidades 3 e 4 vazias
+    plano = {2: [1]} # Apenas cidade 2 tem coleta
+    
+    rota_otimizada = otimizar_trechos_vazios(sample_instance, rota, plano)
+    assert len(rota_otimizada) == 4
+    assert rota_otimizada[0] == 1
+    assert set(rota_otimizada) == {1, 2, 3, 4}
+    
+    solver = QueimadaSolver(otimizar_buracos=True)
+    sol = solver.solve(sample_instance)
+    assert len(sol.rota) == 4
+    assert sol.rota[0] == 1
+    assert "queimada_com_buracos" in SolverRegistry.listar()
+    assert "queimada_backward_buracos" in SolverRegistry.listar()
+    assert "queimada_backward_sem_2opt_buracos" in SolverRegistry.listar()
+
+
