@@ -2,15 +2,24 @@
 Script para geração de cenários aleatórios variados para a bateria de testes do TTP.
 """
 
+import sys
 from pathlib import Path
+
+_raiz = Path(__file__).resolve().parents[2]
+_sim_path = _raiz / "ttp_simulator"
+if str(_raiz) not in sys.path:
+    sys.path.insert(0, str(_raiz))
+if str(_sim_path) not in sys.path:
+    sys.path.insert(0, str(_sim_path))
+
 from src.core.models import TTPInstance
-from src.scenarios.graph_generator import gerar_grafo_normal, gerar_grafo_concentrado
-from src.scenarios.item_generator import gerar_itens, calcular_capacidade_mochila
 from src.scenarios.exporter import exportar_cenario
+from src.scenarios.graph_generator import gerar_grafo_concentrado, gerar_grafo_normal
+from src.scenarios.item_generator import calcular_capacidade_mochila, gerar_itens
 
 
 def gerar_cenarios_bateria():
-    output_dir = Path("bateria_testes")
+    output_dir = _sim_path / "bateria_testes"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     configs = [

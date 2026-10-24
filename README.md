@@ -1,256 +1,292 @@
-# 🚚 Simulador e Framework Experimental do Travelling Thief Problem (TTP)
+# 🚚 Framework Experimental do Travelling Thief Problem (TTP)
 
-Ambiente computacional integrado, modular e reproduzível para simulação, experimentação em lote, benchmarking estatístico, avaliação de sensibilidade do parâmetro de aluguel ($R$) e visualização interativa de resultados para o **Travelling Thief Problem (TTP1 e TTP2)**.
+Ambiente computacional de alto desempenho, modular e reproduzível para simulação, experimentação em lote, benchmarking estatístico, exploração de hiperparâmetros da **Heurística da Queimada** e visualização interativa de resultados para o **Travelling Thief Problem**.
+
+> [!NOTE]
+> **Padrão da Literatura (TTP1):** Quase 100% dos benchmarks da literatura científica utilizam o modelo monobjetivo **TTP1** (Polyakovskiy et al., 2014; Faulkner et al., 2015). Por padrão, todo o framework opera estritamente sob o **TTP1**. O modelo multiobjetivo **TTP2** é suportado integralmente, porém configurado como **opcional** (ativado via flag `--incluir-ttp2` ou `--modelo TTP2`).
 
 ---
 
 ## 📋 Sumário
-1. [Configuração e Instalação](#1-configuração-e-instalação)
-2. [Estrutura do Repositório](#2-estrutura-do-repositório)
-3. [Como Rodar Simulações e Experimentos](#3-como-rodar-simulações-e-experimentos)
-   - [3.1. Orquestrador Unificado (`executar_super_bateria.py`)](#31-orquestrador-unificado-executar_super_bateriapy)
-   - [3.2. Triagem e Separação por Equilíbrio Econômico (`separar_alto_prejuizo.py`)](#32-triagem-e-separação-por-equilíbrio-econômico-separar_alto_prejuizopy)
-   - [3.3. Gerenciador de Quarentena de Instâncias (`quarentena.py`)](#33-gerenciador-de-quarentena-de-instâncias-quarentenapy)
-   - [3.4. Bateria de Instâncias Potencialmente Lucrativas (`filtrar_instancias_lucro.py`)](#34-bateria-de-instâncias-potencialmente-lucrativas-filtrar_instancias_lucropy)
-   - [3.5. Normalizador de Estatísticas (`normalizar_estatisticas.py`)](#35-normalizador-de-estatísticas-normalizar_estatisticaspy)
-   - [3.6. Avaliação de Sensibilidade de $R$ (`avaliacao_r/runner.py`)](#36-avaliação-de-sensibilidade-de-r-avaliacao_rrunnerpy)
-   - [3.7. Execuções Rápidas e Simulações Individuais (`run_simulation.py` e `run_batch.py`)](#37-execuções-rápidas-e-simulações-individuais-run_simulationpy-e-run_batchpy)
-4. [Painel Web / Visualizador Interativo (`visualizador/`)](#4-painel-web--visualizador-interativo-visualizador)
-5. [Como Adicionar um Novo Solver / Heurística](#5-como-adicionar-um-novo-solver--heurística)
-6. [Como Gerar Novos Cenários Sintéticos](#6-como-gerar-novos-cenários-sintéticos)
-7. [Dicionário de Arquivos e Colunas de Resultados (`results/`)](#7-dicionário-de-arquivos-e-colunas-de-resultados-results)
-8. [Boas Práticas e Verificação com Testes](#8-boas-práticas-e-verificação-com-testes)
+1. [Visão Geral e Arquitetura](#1-visão-geral-e-arquitetura)
+2. [Guia Rápido: Como Criar e Rodar sua Heurística Sem Fofoca](#2-guia-rápido-como-criar-e-rodar-sua-heurística-sem-fofoca)
+3. [Instalação e Configuração](#3-instalação-e-configuração)
+4. [Estrutura do Repositório](#4-estrutura-do-repositório)
+5. [Como Rodar os Experimentos](#5-como-rodar-os-experimentos)
+   - [5.1. CLI Rápido de Solucionadores (`testar_heuristica.py`)](#51-cli-rápido-de-solucionadores-testar_heuristicapy)
+   - [5.2. Teste Global e Benchmarking (`scripts/benchmark/`)](#52-teste-global-e-benchmarking-scriptsbenchmark)
+   - [5.3. Experimentos e Hipóteses da Queimada (`scripts/experimentos_queimada/`)](#53-experimentos-e-hipóteses-da-queimada-scriptsexperimentos_queimada)
+   - [5.4. Filtros e Gerenciamento Interno de Instâncias (`scripts/instancias/`)](#54-filtros-e-gerenciamento-interno-de-instâncias-scriptsinstancias)
+   - [5.5. Estudo de Sensibilidade ao Parâmetro $R$ (`avaliacao_r/`)](#55-estudo-de-sensibilidade-ao-parâmetro-r-avaliacao_r)
+6. [Painel Web Interativo (`visualizador/`)](#6-painel-web-interativo-visualizador)
+7. [Dicionário de Resultados (`results/`)](#7-dicionário-de-resultados-results)
+8. [Testes Automatizados](#8-testes-automatizados)
 
 ---
 
-## 🚀 1. Configuração e Instalação
+## ⚡ 1. Visão Geral e Arquitetura
+
+O Travelling Thief Problem combina dois problemas clássicos NP-difíceis:
+1. **Traveling Salesperson Problem (TSP):** Encontrar a rota ótima passando por todas as cidades e retornando à cidade de partida.
+2. **Knapsack Problem (KP):** Selecionar itens de alto valor distribuídos nas cidades sem estourar a capacidade máxima de peso $W$.
+
+A interdependência surge porque o peso coletado na mochila reduz a velocidade do ladrão ao longo do trajeto, aumentando o tempo total de viagem $f$ e o custo de aluguel por unidade de tempo $R$, impactando a função objetivo de lucro líquido:
+$$G = g - R \cdot f$$
+onde $g$ é a soma dos valores dos itens coletados e $f$ é o tempo de percurso.
+
+---
+
+## 🚀 2. Guia Rápido: Como Criar e Rodar sua Heurística Sem Fofoca
+
+Adicionar um novo algoritmo ao framework leva **menos de 2 minutos** em 3 passos simples:
+
+### Passo 1: Criar o arquivo do solver
+Crie um arquivo em [`ttp_simulator/src/solvers/`](file:///ttp_simulator/src/solvers/), por exemplo `meu_solver.py` (ou copie o template pronto [`ttp_simulator/src/solvers/template_heuristica.py`](file:///ttp_simulator/src/solvers/template_heuristica.py)).
+
+### Passo 2: Implementar a classe herdando de `BaseSolver`
+```python
+from typing import Dict, List
+from src.core.models import SolucaoTTP, TTPInstance
+from src.solvers.base import BaseSolver, SolverRegistry
+
+@SolverRegistry.register("meu_solver")
+class MeuSolver(BaseSolver):
+    @property
+    def nome(self) -> str:
+        return "meu_solver"
+
+    def solve(self, instance: TTPInstance) -> SolucaoTTP:
+        # 1. Rota pelas cidades (deve iniciar na cidade 1)
+        tour = list(range(1, instance.num_cities + 1))
+
+        # 2. Plano de coleta de itens (cidade -> lista de item_ids)
+        plano = {c: [] for c in tour}
+        peso_atual = 0.0
+
+        for item in sorted(instance.itens, key=lambda it: it.valor / it.peso, reverse=True):
+            if peso_atual + item.peso <= instance.capacidade_mochila:
+                plano[item.cidade_origem].append(item.id)
+                peso_atual += item.peso
+
+        return SolucaoTTP(rota=tour, plano_coleta=plano)
+```
+
+> [!TIP]
+> Graças à descoberta dinâmica de módulos, você **não precisa editar nenhum arquivo de configuração ou `__init__.py`**. Basta salvar o arquivo e o solver estará registrado automaticamente!
+
+### Passo 3: Testar e comparar imediatamente no terminal
+```bash
+# Testar seu solver em uma instância rápida e comparar com os melhores da literatura:
+python testar_heuristica.py --solver meu_solver --comparar
+
+# Executar na bateria rápida de instâncias:
+python testar_heuristica.py --solver meu_solver --bateria
+
+# Ver todos os solvers registrados:
+python testar_heuristica.py --listar
+```
+
+---
+
+## 📦 3. Instalação e Configuração
 
 ### Pré-requisitos
-- **Python 3.10+** (recomendado Python 3.11 ou superior)
+- **Python 3.10+** (recomendado Python 3.11 ou 3.13)
 - Gerenciador de pacotes `pip`
 
-### Passo a Passo
+```bash
+# 1. Clonar o repositório
+git clone <URL_DO_REPOSITORIO>
+cd HM_TTP
 
-1. **Clone ou baixe o repositório:**
-   ```bash
-   git clone <URL_DO_REPOSITORIO>
-   cd HM_TTP
-   ```
+# 2. Criar e ativar ambiente virtual
+# No Windows (PowerShell):
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 
-2. **Crie e ative o ambiente virtual:**
-   - **No Windows (PowerShell):**
-     ```powershell
-     python -m venv .venv
-     .\.venv\Scripts\Activate.ps1
-     ```
-   - **No Linux / macOS (Bash):**
-     ```bash
-     python3 -m venv .venv
-     source .venv/bin/activate
-     ```
+# No Linux / macOS:
+python3 -m venv .venv
+source .venv/bin/activate
 
-3. **Instale as dependências:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+# 3. Instalar dependências
+pip install -r requirements.txt
+```
 
 ---
 
-## 📂 2. Estrutura do Repositório
+## 📂 4. Estrutura do Repositório
+
+O projeto possui uma organização limpa e modular:
 
 ```text
 HM_TTP/
-├── executar_super_bateria.py      # Orquestrador central: bateria completa + avaliação de R
-├── separar_alto_prejuizo.py       # Triagem econômica (Receita/Custo >= 0.5) e separação de instâncias
-├── quarentena.py                  # Gerenciador de quarentena para instâncias não finalizadas
-├── filtrar_instancias_lucro.py    # Filtro teórico de lucro (UB > 0) e bateria dedicada
-├── normalizar_estatisticas.py     # Normalizador estatístico [0, 1] (melhor = 1.0000)
-├── requirements.txt               # Dependências do ecossistema Python
+├── testar_heuristica.py          # 🎯 CLI amigável para testar qualquer solver sem fofoca
+├── requirements.txt              # Dependências do ecossistema Python
+├── README.md                     # Documentação central do projeto
 │
-├── visualizador/                  # Dashboard Web interativo
-│   ├── index.html                 # Aplicação web estática completa (offline, gráficos Chart.js)
-│   └── gerar_site.py              # Script que atualiza o index.html com os dados mais recentes de results/
+├── scripts/                      # 🛠️ Scripts utilitários e experimentais categorizados
+│   ├── benchmark/                # 🚀 Teste global de todos os solvers e consolidação
+│   │   ├── executar_super_bateria.py
+│   │   └── normalizar_estatisticas.py
+│   ├── experimentos_queimada/    # 🔥 Testes de hipóteses e grid search da Queimada
+│   │   ├── comparar_queimadas.py
+│   │   ├── grid_search_paralelo.py
+│   │   ├── grid_search_queimada.py
+│   │   └── executar_comparativo.py
+│   └── instancias/               # 🧹 Scripts internos de triagem e quarentena
+│       ├── separar_alto_prejuizo.py
+│       ├── filtrar_instancias_lucro.py
+│       ├── quarentena.py
+│       └── gerar_cenarios_teste.py
 │
-├── avaliacao_r/                   # Módulo de sensibilidade e acoplamento do aluguel R
-│   ├── config.py                  # Parâmetros e limites da avaliação de R
-│   ├── evaluator.py               # Motor de varredura de R e cálculo de gap
-│   ├── exact_solvers.py           # Resolvedores exatos para instâncias reduzidas (B&B, DP)
-│   ├── heuristic_solvers.py       # Heurísticas adaptadas para varredura de R
-│   ├── relatorios.py              # Exportação de tabelas e métricas analíticas
-│   ├── runner.py                  # CLI da bateria de avaliação de R
-│   ├── resultados/                # CSVs e JSONs gerados pela avaliação de R
-│   └── tests/                     # Testes de unidade da avaliação de R
+├── results/                      # 📊 Pasta ÚNICA de saída para todos os CSVs
+│   ├── README.md                 # Dicionário de arquivos e colunas dos resultados
+│   ├── bateria_solucoes_detalhada.csv
+│   ├── comparativo_estatisticas_ttp1_ttp2.csv
+│   ├── comparativo_estatisticas_normalizadas.csv
+│   ├── bateria_equilibradas_detalhada.csv
+│   ├── comparativo_estatisticas_equilibradas.csv
+│   ├── triagem_alto_prejuizo.csv
+│   └── grid_search_queimada_completo.csv
 │
-├── ttp_simulator/                 # Simulador central do TTP
-│   ├── bateria_testes/            # Pasta com os arquivos de instâncias equilibradas (.txt / .ttp)
-│   │   ├── alto_prejuizo/         # Subpasta contendo instâncias com prejuízo desproporcional
-│   │   └── quarentena/            # Subpasta para instâncias isoladas temporariamente
-│   ├── gerar_cenarios_teste.py    # Gerador de cenários sintéticos
-│   ├── run_simulation.py          # Execução de simulação unitária
-│   ├── run_batch.py               # Execução de simulações em lote
+├── ttp_simulator/                # 🚚 Motor central do TTP
+│   ├── bateria_testes/           # Instâncias de teste (.txt e .ttp)
+│   │   └── alto_prejuizo/        # Subpasta para instâncias desbalanceadas (Razão < 0.5)
 │   ├── src/
-│   │   ├── core/                  # Modelos matemáticos (TTP1/TTP2) e avaliadores de rota/mochila
-│   │   ├── scenarios/             # Leitores de instâncias (.txt/.ttp) e gerador sintético
-│   │   ├── solvers/               # Registro central (SolverRegistry) e implementações de algoritmos
-│   │   ├── runners/               # Motores BatchRunner e SimulationRunner com ordenação por tamanho
-│   │   └── utils/                 # Métricas estatísticas, exportadores CSV e formatação
-│   └── tests/                     # Bateria de testes automatizados com pytest
+│   │   ├── core/                 # Modelos matemáticos (models, evaluators)
+│   │   ├── solvers/              # Implementações de solucionadores e template
+│   │   ├── scenarios/            # Leitores de instâncias (.txt / .ttp)
+│   │   ├── runners/              # Motores paralelos BatchRunner com Resume
+│   │   └── utils/                # Loggers CSV e métricas
+│   └── tests/                    # Bateria de testes automatizados com pytest
 │
-└── results/                       # Diretório central de exportação dos resultados
-    ├── bateria_solucoes_detalhada.csv                     # Registro completo execução a execução (todas)
-    ├── comparativo_estatisticas_ttp1_ttp2.csv             # Consolidação estatística de todas as instâncias
-    ├── comparativo_estatisticas_normalizadas.csv          # Estatísticas normalizadas [0, 1] (todas)
-    ├── bateria_equilibradas_detalhada.csv                 # Registro detalhado das instâncias equilibradas (34)
-    ├── comparativo_estatisticas_equilibradas.csv          # Consolidação estatística das instâncias equilibradas
-    ├── comparativo_estatisticas_equilibradas_normalizadas.csv # Estatísticas normalizadas [0, 1] equilibradas
-    ├── triagem_alto_prejuizo.csv                          # Relatório de triagem teórica e classificação das 550
-    ├── filtro_instancias_lucrativas.csv                   # Diagnóstico teórico de lucro UB > 0
-    ├── bateria_lucrativas_detalhada.csv                   # Execuções exclusivas em instâncias com UB > 0
-    └── comparativo_estatisticas_lucrativas.csv            # Resumo estatístico do subconjunto lucrativo
+├── avaliacao_r/                  # 📐 Estudo de sensibilidade ao parâmetro de aluguel R
+└── visualizador/                 # 🌐 Painel web analítico e visualizador interativo
 ```
 
 ---
 
-## 💻 3. Como Rodar Simulações e Experimentos
+## 💻 5. Como Rodar os Experimentos
 
-O framework oferece ferramentas especializadas para diferentes etapas da pesquisa experimental.
+### 5.1. CLI Rápido de Solucionadores (`testar_heuristica.py`)
 
-### 3.1. Orquestrador Unificado (`executar_super_bateria.py`)
-
-O orquestrador unificado executa de ponta a ponta as duas etapas fundamentais do projeto:
-1. **Etapa 1 (`solucoes`)**: Executa todas as instâncias para todos os solucionadores cadastrados nos modelos TTP1 e TTP2, gerando os resultados detalhados e a consolidação estatística (médias, medianas, quartis Q1/Q3, desvio padrão, tempos de CPU).
-2. **Etapa 2 (`avaliacao_r`)**: Avalia a sensibilidade ao parâmetro de aluguel $R$ para mapear o ponto de cruzamento ($R_c$), a faixa de 90% e a zona de forte acoplamento.
-
-#### Características operacionais
-- **Ordenação por tamanho**: O runner ordena automaticamente as instâncias das menores para as maiores (cidades $\rightarrow$ itens $\rightarrow$ tamanho em bytes), garantindo resultados rápidos logo no início.
-- **Retomada Automática (*Resume*)**: Ao reiniciar o comando, ele lê o CSV existente e processa apenas as instâncias e solvers faltantes, sem retrabalho.
-- **Interrupção Segura (Ctrl+C)**: Ao pressionar Ctrl+C uma vez, os processos em andamento finalizam atomicamente a linha atual e gravam o CSV no disco de forma íntegra.
-- **Isolamento de Subpastas**: Por padrão, o runner ignora subpastas como `quarentena` e `alto_prejuizo`, executando apenas as instâncias da raiz de `bateria_testes/`.
-
-#### Comandos:
-
-- **Execução padrão sobre a bateria ativa (Etapa 1 + Etapa 2 em paralelo):**
-  ```bash
-  python executar_super_bateria.py
-  ```
-
-- **Executar explicitamente sobre as instâncias de `alto_prejuizo`:**
-  ```bash
-  python executar_super_bateria.py --incluir-alto-prejuizo
-  ```
-
-- **Executar sobre diretório customizado:**
-  ```bash
-  python executar_super_bateria.py --diretorio-bateria ttp_simulator/bateria_testes/alto_prejuizo
-  ```
-
-- **Executar com número específico de processos concorrentes (ex: 4 workers):**
-  ```bash
-  python executar_super_bateria.py --workers 4
-  ```
-
-- **Executar somente a bateria de soluções (Etapa 1):**
-  ```bash
-  python executar_super_bateria.py --etapa solucoes
-  ```
-
-- **Executar somente a avaliação de $R$ (Etapa 2):**
-  ```bash
-  python executar_super_bateria.py --etapa avaliacao_r
-  ```
-
----
-
-### 3.2. Triagem e Separação por Equilíbrio Econômico (`separar_alto_prejuizo.py`)
-
-Em muitas instâncias sintéticas, a taxa de aluguel por unidade de tempo ($R$) é tão elevada em relação ao valor dos itens que o tempo de viagem domina mais de 99% da função objetivo, transformando o problema artificialmente em um TSP puro. Para isolar esses casos e garantir comparações equilibradas e justas entre mochila e rota:
-
-1. **Critério de Classificação:**
-   $$\text{Razão} = \frac{\text{Receita Potencial Máxima (Mochila Fracionária)}}{\text{Custo Estimado Mínimo de Transporte } (R \cdot L_{\text{MST}} / v_{\max})}$$
-   - Se $\text{Razão} \ge 0.5$: A instância é classificada como **Equilibrada** e permanece em `ttp_simulator/bateria_testes/`.
-   - Se $\text{Razão} < 0.5$: A instância é classificada como **Alto Prejuízo** e seus arquivos são movidos para `ttp_simulator/bateria_testes/alto_prejuizo/`.
-2. **Aproveitamento de Resultados Sem Reexecução:**
-   O script extrai as execuções das instâncias equilibradas a partir de `bateria_solucoes_detalhada.csv`, gerando imediatamente:
-   - `results/bateria_equilibradas_detalhada.csv`
-   - `results/comparativo_estatisticas_equilibradas.csv`
-   - `results/comparativo_estatisticas_equilibradas_normalizadas.csv`
-   - `results/triagem_alto_prejuizo.csv`
-
-#### Comandos:
-
-- **Executar triagem, mover arquivos e gerar consolidados filtrados:**
-  ```bash
-  python separar_alto_prejuizo.py
-  ```
-
-- **Apenas auditar status das instâncias sem mover arquivos (*dry-run*):**
-  ```bash
-  python separar_alto_prejuizo.py --listar
-  ```
-
-- **Restaurar todas as instâncias de `alto_prejuizo` de volta para `bateria_testes`:**
-  ```bash
-  python separar_alto_prejuizo.py --restaurar
-  ```
-
----
-
-### 3.3. Gerenciador de Quarentena de Instâncias (`quarentena.py`)
-
-Identifica instâncias incompletas ou pendentes no CSV detalhado e as move temporariamente para `ttp_simulator/bateria_testes/quarentena/`.
-
-#### Comandos:
-
-- **Auditar status das instâncias sem mover nada (*dry-run*):**
-  ```bash
-  python quarentena.py --listar
-  ```
-
-- **Mover instâncias incompletas para quarentena:**
-  ```bash
-  python quarentena.py
-  ```
-
-- **Restaurar todas as instâncias da quarentena de volta para a bateria de testes:**
-  ```bash
-  python quarentena.py --restaurar
-  ```
-
----
-
-### 3.4. Bateria de Instâncias Potencialmente Lucrativas (`filtrar_instancias_lucro.py`)
-
-Filtra e executa exclusivamente as instâncias com Limitante Superior Teórico positivo ($UB > 0$), gerando relatórios dedicados em `results/`.
-
-#### Comandos:
-
-- **Executar filtro e rodar a bateria lucrativa:**
-  ```bash
-  python filtrar_instancias_lucro.py --workers 6
-  ```
-
-- **Apenas gerar o relatório do filtro teórico (sem executar simulações):**
-  ```bash
-  python filtrar_instancias_lucro.py --apenas-filtrar
-  ```
-
----
-
-### 3.5. Normalizador de Estatísticas (`normalizar_estatisticas.py`)
-
-Transforma as métricas para a escala $[0, 1]$ para cada modelo separadamente, onde **o melhor resultado recebe 1.0000** e os demais recebem valores $0.XXXX$ proporcionais:
-- **Métricas de Ganho (maior é melhor)**: `media_G`, `min_G`, `q1_G`, `mediana_G`, `q3_G`, `max_G`.
-- **Métricas de Custo/Tempo (menor é melhor)**: `media_tempo_cpu_ms`, `std_G`.
+Localizado na raiz, é o ponto de entrada rápido para quem desenvolve novos solvers:
 
 ```bash
-python normalizar_estatisticas.py
+# Listar todos os solucionadores cadastrados
+python testar_heuristica.py --listar
+
+# Testar seu solver em instância padrão (cenario_pequeno_10c.txt)
+python testar_heuristica.py --solver queimada
+
+# Testar e comparar lado a lado com baselines (com pódio 🥇, 🥈, 🥉)
+python testar_heuristica.py --solver queimada --comparar
+
+# Testar em instância específica
+python testar_heuristica.py --solver pack_iterative --instancia 512.ttp
+
+# Executar bateria rápida em instâncias representativas
+python testar_heuristica.py --solver heuristic_37_refinada --bateria
+
+# Exibir detalhes da rota e lista de itens roubados
+python testar_heuristica.py --solver queimada --detalhes
+
+# Testar sob o modelo TTP2 (opcional)
+python testar_heuristica.py --solver queimada --modelo TTP2
 ```
 
 ---
 
-### 3.6. Avaliação de Sensibilidade de $R$ (`avaliacao_r/runner.py`)
+### 5.2. Teste Global e Benchmarking (`scripts/benchmark/`)
 
-Executa o estudo de sensibilidade ao aluguel por unidade de tempo ($R$):
+Executa todos os solucionadores cadastrados em todas as instâncias da bateria de testes, com suporte a **multiprocessamento paralelo**, **ordenação inteligente por tamanho** (instâncias menores rodam primeiro) e **retomada automática (*Resume*)**.
+
+```bash
+# Execução padrão completa (Etapa 1: Soluções + Etapa 2: Avaliação de R)
+python scripts/benchmark/executar_super_bateria.py
+
+# Executar apenas a bateria de soluções (Etapa 1) com 8 workers
+python scripts/benchmark/executar_super_bateria.py --etapa solucoes --workers 8
+
+# Filtrar instâncias específicas por padrão glob
+python scripts/benchmark/executar_super_bateria.py --padrao "cenario_*"
+
+# Executar solvers específicos
+python scripts/benchmark/executar_super_bateria.py --solvers "queimada,heuristic_37_refinada,pack_iterative"
+
+# Incluir o modelo TTP2 na bateria (por padrão roda apenas TTP1)
+python scripts/benchmark/executar_super_bateria.py --incluir-ttp2
+
+# Normalizar as estatísticas geradas no intervalo [0, 1] (melhor = 1.0000)
+python scripts/benchmark/normalizar_estatisticas.py
+```
+
+---
+
+### 5.3. Experimentos e Hipóteses da Queimada (`scripts/experimentos_queimada/`)
+
+Scripts dedicados a validar hipóteses científicas e afinar hiperparâmetros da Heurística da Queimada:
+
+```bash
+# 1. Comparação direta visual entre variantes da Queimada vs Estado da Arte
+python scripts/experimentos_queimada/comparar_queimadas.py
+
+# Comparar em instâncias selecionadas
+python scripts/experimentos_queimada/comparar_queimadas.py --instancias 512.ttp cenario_medio_20c.txt
+
+# 2. Grid Search Paralelo de Alto Desempenho (com Resume automático)
+# Espaço padrão (288 combinações) em instâncias leves:
+python scripts/experimentos_queimada/grid_search_paralelo.py --espaco padrao --instancias leves
+
+# Espaço rápido (construtivo sem 2-opt) em todas as instâncias:
+python scripts/experimentos_queimada/grid_search_paralelo.py --espaco rapido --workers 8
+
+# Espaço completo (2.880 combinações com backward edges e afinidade térmica):
+python scripts/experimentos_queimada/grid_search_paralelo.py --espaco completo --workers 12
+
+# 3. Grid Search clássico serial de referência
+python scripts/experimentos_queimada/grid_search_queimada.py
+
+# 4. Bateria comparativa serial com quartis e desvio padrão
+python scripts/experimentos_queimada/executar_comparativo.py
+```
+
+---
+
+### 5.4. Filtros e Gerenciamento Interno de Instâncias (`scripts/instancias/`)
+
+Módulos internos para auditar, balancear e isolar instâncias da base:
+
+```bash
+# 1. Triagem econômica (Receita Máxima da Mochila / Custo Mínimo na MST >= 0.5)
+# Classifica, move instâncias desbalanceadas para 'alto_prejuizo' e extrai resultados:
+python scripts/instancias/separar_alto_prejuizo.py
+
+# Apenas auditar sem mover arquivos (dry-run):
+python scripts/instancias/separar_alto_prejuizo.py --listar
+
+# Restaurar instâncias de volta para a pasta principal:
+python scripts/instancias/separar_alto_prejuizo.py --restaurar
+
+# 2. Filtro teórico de lucro matemático (Limitante Superior Dantzig - MST > 0)
+python scripts/instancias/filtrar_instancias_lucro.py --apenas-filtrar
+
+# Rodar bateria dedicada nas instâncias com UB > 0:
+python scripts/instancias/filtrar_instancias_lucro.py --workers 6
+
+# 3. Gerenciamento de quarentena de instâncias incompletas
+python scripts/instancias/quarentena.py --listar
+python scripts/instancias/quarentena.py --restaurar
+
+# 4. Gerar novos cenários sintéticos de teste
+python scripts/instancias/gerar_cenarios_teste.py
+```
+
+---
+
+### 5.5. Estudo de Sensibilidade ao Parâmetro $R$ (`avaliacao_r/`)
+
+Mapeia o comportamento das heurísticas sob variação sistemática da taxa de aluguel por unidade de tempo ($R$), identificando o ponto de transição ($R_c$) e as zonas de acoplamento forte:
 
 ```bash
 python -m avaliacao_r.runner --workers 4
@@ -258,144 +294,54 @@ python -m avaliacao_r.runner --workers 4
 
 ---
 
-### 3.7. Execuções Rápidas e Simulações Individuais (`run_simulation.py` e `run_batch.py`)
+## 🌐 6. Painel Web Interativo (`visualizador/`)
 
-- **Simulação Individual (`ttp_simulator/run_simulation.py`):**
-  ```bash
-  python ttp_simulator/run_simulation.py \
-    --instance ttp_simulator/bateria_testes/instancia_01.txt \
-    --solver queimada \
-    --model TTP1 \
-    --seed 42 \
-    --output results/teste_rapido.csv
-  ```
+O repositório inclui um dashboard interativo completo para visualização científica de dados, matrizes de desempenho (*Heat Grid* com pódios 🥇, 🥈, 🥉), gráficos de radar e dispersão.
 
-- **Bateria em Lote via CLI Simples (`ttp_simulator/run_batch.py`):**
-  ```bash
-  python ttp_simulator/run_batch.py \
-    --test-dir ttp_simulator/bateria_testes/ \
-    --solvers queimada \
-    --models TTP1 \
-    --runs 1 \
-    --output results/lote_rapido.csv
-  ```
-
----
-
-## 🌐 4. Painel Web / Visualizador Interativo (`visualizador/`)
-
-O repositório inclui um dashboard interativo completo para visualização, exploração de dados, gráficos dinâmicos e filtragem de soluções.
-
-### Como abrir o Dashboard
-
-1. **Abertura direta no navegador:**
-   - Dê um duplo clique no arquivo [`visualizador/index.html`](file:///visualizador/index.html) ou abra-o em qualquer navegador web.
-   - O arquivo funciona de maneira autônoma e offline.
-
-2. **Servindo via servidor HTTP local (opcional):**
+### Como abrir o painel:
+1. **Diretamente:** Abra o arquivo [`visualizador/index.html`](file:///visualizador/index.html) no navegador (funciona 100% offline).
+2. **Atualizar o site com novos resultados:**
+   ```bash
+   python visualizador/gerar_site.py
+   # Carregar um CSV específico no dashboard:
+   python visualizador/gerar_site.py --csv results/grid_search_queimada_completo.csv
+   ```
+3. **Servir localmente via HTTP (opcional):**
    ```bash
    python -m http.server 8000 --directory visualizador
    ```
-   Em seguida, acesse no navegador: `http://localhost:8000`
-
-### Como Atualizar e Alternar Datasets no Site
-
-Por padrão, o gerador do site carrega as **instâncias equilibradas** (com $\text{Receita} / \text{Custo} \ge 0.5$). Você pode configurar o modo padrão via terminal:
-
-- **Gerar com dataset equilibrado por padrão (recomendado):**
-  ```bash
-  python visualizador/gerar_site.py
-  # ou explicitamente:
-  python visualizador/gerar_site.py --modo equilibradas
-  ```
-
-- **Gerar com todas as 550 instâncias:**
-  ```bash
-  python visualizador/gerar_site.py --modo todas
-  ```
-
-### Funcionalidades do Painel Analítico:
-- **Design Sóbrio e Acadêmico (*Data-First*):** Interface neutra voltada para análise técnica rigorosa, sem elementos visuais distrativos ou saturação excessiva.
-- **Heat Grid (Matriz de Desempenho):**
-  - **Destaque Especial para o Top 3 por Coluna:** Os três melhores colocados em cada métrica recebem cores de pódio exclusivas e inconfundíveis, fora do gradiente:
-    - 🥇 **Ouro:** Amarelo ouro vivo (`🥇`)
-    - 🥈 **Prata:** Cinza ardósia / metálico neutro (`🥈`)
-    - 🥉 **Bronze:** Cobre / terracota avermelhado quente (`🥉`)
-  - **Gradiente Monocromático:** Os quadrantes do 4º lugar em diante utilizam um gradiente suave em azul cobalto técnico proporcional ao score normalizado ($0.00 \to 1.00$).
-- **Aba Exclusiva para Dados Brutos:** Tabela separada com valores absolutos de função objetivo ($G$), tempos de computação em milissegundos e métricas de dispersão.
-- **Ordenação Numérica Rigorosa:** Cabeçalhos clicáveis com alternância crescente/decrescente (`▲` / `▼`) baseada em atributos de ponto flutuante nativos (`data-val`), imune a ambiguidades de pontuação regional (`.` de milhar e `,` decimal).
-- **Modo Noturno Confortável:** Paleta de ardósia profunda neutra com divisores translúcidos suaves, eliminando bordas rígidas ou efeito quadriculado pesado, com persistência automática de tema.
-- **Alternância Instantânea de Datasets:** Seletor no cabeçalho para alternar entre as 34 instâncias equilibradas (padrão) e as 550 instâncias completas em tempo real.
+   Acesse: `http://localhost:8000`
 
 ---
 
-## 🛠️ 5. Como Adicionar um Novo Solver / Heurística
+## 📊 7. Dicionário de Resultados (`results/`)
 
-1. **Criar o arquivo:** em `ttp_simulator/src/solvers/`, ex: `meu_novo_solver.py`.
-2. **Implementar a classe herdando de `BaseSolver`:**
-   ```python
-   from src.core.models import SolucaoTTP, TTPInstance
-   from src.solvers.base import BaseSolver
-   from src.solvers.registry import SolverRegistry
+Todos os dados exportados ficam centralizados em [`results/`](file:///results/) (consulte [`results/README.md`](file:///results/README.md) para detalhes):
 
-   @SolverRegistry.register("meu_novo_solver")
-   class MeuNovoSolver(BaseSolver):
-       def solve(self, instance: TTPInstance) -> SolucaoTTP:
-           # Implementação da rota e do plano de coleta
-           tour = list(range(1, instance.num_cities + 1))
-           plano = {}
-           return SolucaoTTP(tour=tour, picking_plan=plano)
-   ```
-3. **Importar em `ttp_simulator/src/solvers/__init__.py`:**
-   ```python
-   from src.solvers.meu_novo_solver import MeuNovoSolver
-   ```
-
----
-
-## 🎲 6. Como Gerar Novos Cenários Sintéticos
-
-```bash
-python ttp_simulator/gerar_cenarios_teste.py
-```
-
----
-
-## 📊 7. Dicionário de Arquivos e Colunas de Resultados (`results/`)
-
-### Arquivo Detalhado: `bateria_equilibradas_detalhada.csv` / `bateria_solucoes_detalhada.csv`
-Contém o registro de cada simulação individual executada:
-
-| Coluna | Descrição |
+| Arquivo | Descrição |
 | :--- | :--- |
-| `id_execucao` | Identificador único alfanumérico da execução |
-| `timestamp` | Data e hora em formato ISO |
-| `arquivo_instancia` | Nome do arquivo de instância avaliado |
-| `modelo_ttp` | Variante matemática (`TTP1` ou `TTP2`) |
-| `solucionador` | Nome identificador do solver registrado |
-| `seed` | Semente pseudoaleatória utilizada |
-| `tempo_computacional_seg` | Tempo total de execução do método em segundos |
-| `lucro_liquido_G` | Valor da função objetivo final $G$ calculada |
-| `tempo_viagem_f` | Tempo total consumido no percurso pelas cidades |
-| `valor_bruto_itens_g` | Soma dos valores dos itens recolhidos |
-| `peso_acumulado_mochila` | Peso final transportado na mochila |
-| `capacidade_mochila_W` | Capacidade limite de peso da mochila |
-| `pct_ocupacao_mochila` | Percentual de peso utilizado da mochila ($\%$) |
-| `qtd_itens_coletados` | Total de itens coletados pelo plano |
-| `total_itens_instancia` | Total de itens existentes na instância |
-| `qtd_cidades` | Quantidade de cidades no grafo da instância |
-
-### Arquivos Consolidados e Normalizados
-- `comparativo_estatisticas_equilibradas.csv` e `comparativo_estatisticas_ttp1_ttp2.csv`: `media_G`, `std_G`, `min_G`, `q1_G`, `mediana_G`, `q3_G`, `max_G`, `media_tempo_cpu_ms`, `media_tempo_viagem`, etc.
-- `comparativo_estatisticas_equilibradas_normalizadas.csv`: Valores normalizados em $[0, 1]$ com melhor $= 1.0000$.
-- `triagem_alto_prejuizo.csv`: Lista das 550 instâncias com cidades, itens, aluguel $R$, receita máxima da mochila, custo mínimo de aluguel e classificação (`EQUILIBRADA` vs `ALTO_PREJUIZO`).
+| `bateria_solucoes_detalhada.csv` | Todas as execuções run-a-run da bateria global (todas as 550 instâncias). |
+| `comparativo_estatisticas_ttp1_ttp2.csv` | Consolidação estatística com Média, Desvio Padrão, Mediana, Q1, Q3, Mín, Máx e CPU. |
+| `comparativo_estatisticas_normalizadas.csv` | Desempenho relativo normalizado no intervalo $[0, 1]$ (melhor = `1.0000`). |
+| `bateria_equilibradas_detalhada.csv` | Execuções detalhadas apenas nas 34 instâncias equilibradas ($\text{Razão} \ge 0.5$). |
+| `comparativo_estatisticas_equilibradas.csv` | Estatísticas consolidadas das 34 instâncias equilibradas. |
+| `comparativo_estatisticas_equilibradas_normalizadas.csv` | Dados normalizados $[0, 1]$ do subconjunto equilibrado. |
+| `triagem_alto_prejuizo.csv` | Classificação teórica de todas as 550 instâncias (`EQUILIBRADA` vs `ALTO_PREJUIZO`). |
+| `filtro_instancias_lucrativas.csv` | Classificação matemática por Limitante Superior ($UB > 0$). |
+| `bateria_lucrativas_detalhada.csv` | Execuções no subconjunto comprovadamente lucrativo. |
+| `grid_search_queimada_completo.csv` | 2.880 configurações avaliadas com afinidade térmica e backward edges. |
+| `grid_search_queimada_padrao.csv` | 288 configurações do espaço clássico. |
+| `grid_search_queimada_rapido.csv` | Espaço construtivo rápido sem 2-opt. |
 
 ---
 
-## 🛡️ 8. Boas Práticas e Verificação com Testes
+## 🛡️ 8. Testes Automatizados
 
-Execute a suite de testes antes de efetuar commits:
+A suíte de testes unitários cobre modelos matemáticos, parsers, avaliadores e solvers:
+
 ```bash
-pytest -v
+# Executar todos os testes com o pytest do ambiente virtual
+.\.venv\Scripts\pytest -v
 ```
-Todos os 94 testes unitários do framework devem passar com sucesso.
+
+Todos os 97 testes automatizados devem passar com sucesso em frações de segundo.

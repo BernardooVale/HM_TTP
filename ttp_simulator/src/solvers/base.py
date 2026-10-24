@@ -21,12 +21,23 @@ class SolverRegistry:
     _registry_modules: dict[str, tuple[str, str]] = {}
     
     @classmethod
-    def register(cls, solver_class: type[BaseSolver]) -> type[BaseSolver]:
-        """Decorator to register a solver."""
-        instance = solver_class()
-        cls._registry[instance.nome] = solver_class
-        cls._registry_modules[instance.nome] = (solver_class.__module__, solver_class.__name__)
-        return solver_class
+    def register(cls, name_or_class=None):
+        """Decorator flexível para registrar um solver (suporta @SolverRegistry.register ou @SolverRegistry.register('nome'))."""
+        if name_or_class is not None and isinstance(name_or_class, type) and issubclass(name_or_class, BaseSolver):
+            solver_class = name_or_class
+            instance = solver_class()
+            cls._registry[instance.nome] = solver_class
+            cls._registry_modules[instance.nome] = (solver_class.__module__, solver_class.__name__)
+            return solver_class
+
+        def decorator(solver_class: type[BaseSolver]) -> type[BaseSolver]:
+            instance = solver_class()
+            nome_chave = name_or_class if isinstance(name_or_class, str) else instance.nome
+            cls._registry[nome_chave] = solver_class
+            cls._registry_modules[nome_chave] = (solver_class.__module__, solver_class.__name__)
+            return solver_class
+
+        return decorator
     
     @classmethod
     def get(cls, nome: str) -> BaseSolver:

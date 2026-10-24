@@ -3,15 +3,16 @@ Script de Comparação Direta entre a Nova Queimada (Backward Edges) e as demais
 
 Executa:
 1. queimada (Kruskal padrão - base)
-2. queimada_inicio (orientação invertida)
-3. queimada_backward_arestas (Nova: encadeamento reverso de arestas mais quentes com 2-opt)
-4. queimada_backward_sem_2opt (Nova: encadeamento reverso puro de arestas mais quentes)
-5. heuristic_37_refinada (Campeã dos 37%)
-6. pack_iterative (Literatura)
+2. queimada_backward_arestas (Nova: encadeamento reverso de arestas mais quentes com 2-opt)
+3. queimada_backward_buracos (Nova: com preenchimento térmico de buracos)
+4. queimada_backward_sem_2opt
+5. queimada_backward_sem_2opt_buracos
+6. heuristic_37_refinada (Campeã dos 37%)
+7. pack_iterative (Literatura)
 
 Uso:
-    python comparar_queimadas.py
-    python comparar_queimadas.py --instancias 512.ttp instancia_01.txt cenario_medio_20c.txt
+    python scripts/experimentos_queimada/comparar_queimadas.py
+    python scripts/experimentos_queimada/comparar_queimadas.py --instancias 512.ttp instancia_01.txt cenario_medio_20c.txt
 """
 
 import argparse
@@ -26,13 +27,13 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-# Adiciona ttp_simulator ao path
-raiz = Path(__file__).resolve().parent
-sim_path = raiz / "ttp_simulator"
-if str(raiz) not in sys.path:
-    sys.path.insert(0, str(raiz))
-if str(sim_path) not in sys.path:
-    sys.path.insert(0, str(sim_path))
+# Adiciona ttp_simulator e raiz ao path
+_raiz = Path(__file__).resolve().parents[2]
+_sim_path = _raiz / "ttp_simulator"
+if str(_raiz) not in sys.path:
+    sys.path.insert(0, str(_raiz))
+if str(_sim_path) not in sys.path:
+    sys.path.insert(0, str(_sim_path))
 
 import src.solvers  # Trigger registration
 from src.core.evaluator_ttp1 import avaliar_ttp1
@@ -42,7 +43,7 @@ from src.solvers.base import SolverRegistry
 
 
 def comparar(instancias_nomes=None, modelo="TTP1"):
-    pasta_testes = raiz / "ttp_simulator" / "bateria_testes"
+    pasta_testes = _sim_path / "bateria_testes"
 
     if not instancias_nomes:
         instancias_nomes = [
@@ -119,7 +120,7 @@ def comparar(instancias_nomes=None, modelo="TTP1"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Comparativo de Heurísticas TTP")
     parser.add_argument("--instancias", nargs="*", default=None, help="Nomes dos arquivos de instâncias")
-    parser.add_argument("--modelo", choices=["TTP1", "TTP2"], default="TTP1", help="Modelo TTP (padrão: TTP1)")
+    parser.add_argument("--modelo", choices=["TTP1", "TTP2"], default="TTP1", help="Modelo TTP (padrão: TTP1; TTP2 é opcional)")
     args = parser.parse_args()
 
     comparar(instancias_nomes=args.instancias, modelo=args.modelo)

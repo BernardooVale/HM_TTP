@@ -1,8 +1,15 @@
 import math
+import sys
+from pathlib import Path
 import pytest
+
+_raiz = Path(__file__).resolve().parents[2]
+if str(_raiz) not in sys.path:
+    sys.path.insert(0, str(_raiz))
+
 from src.core.models import Cidade, Grafo, Item, SolucaoTTP, TTPInstance
 from src.core.evaluator_ttp1 import avaliar_ttp1
-from filtrar_instancias_lucro import (
+from scripts.instancias.filtrar_instancias_lucro import (
     calcular_mochila_divisivel,
     calcular_mst_prim,
     analisar_instancia_lucro,

@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 # Configura paths
-_raiz = Path(__file__).resolve().parent
+_raiz = Path(__file__).resolve().parents[2]
 _sim_path = _raiz / "ttp_simulator"
 if str(_raiz) not in sys.path:
     sys.path.insert(0, str(_raiz))

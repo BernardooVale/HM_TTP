@@ -3,8 +3,8 @@ Orquestrador Unificado de Baterias de Testes do Traveling Thief Problem (TTP).
 
 Executa sequencialmente:
 1. Etapa 1 (ttp_simulator): Teste em lote de todas as instâncias para todas as soluções
-   e variações de heurísticas, segregando TTP1 e TTP2, gerando métricas detalhadas e
-   consolidação estatística (média, desvio padrão, mínimo, Q1, mediana, Q3, máximo, tempos).
+   e variações de heurísticas (padrão: TTP1; TTP2 opcional via --incluir-ttp2), gerando
+   métricas detalhadas e consolidação estatística (média, desvio padrão, mínimo, Q1, mediana, Q3, máximo, tempos).
    Suporta adição de novos solvers: ao incluir um novo solver, o runner detecta automaticamente
    que os anteriores já foram rodados e processa apenas o novo solver, incorporando-o ao CSV consolidado.
 2. Etapa 2 (avaliacao_r): Avaliação do impacto de R em paralelo para determinar o
@@ -33,7 +33,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 # Adiciona caminhos do projeto ao sys.path
-_raiz = Path(__file__).resolve().parent
+_raiz = Path(__file__).resolve().parents[2]
 _sim_path = _raiz / "ttp_simulator"
 if str(_raiz) not in sys.path:
     sys.path.insert(0, str(_raiz))
@@ -99,7 +99,7 @@ def executar_orquestrador(
     csv_detalhado = output_solucoes or str(pasta_resultados / "bateria_solucoes_detalhada.csv")
     csv_estatisticas = output_stats or str(pasta_resultados / "comparativo_estatisticas_ttp1_ttp2.csv")
 
-    modelos = modelos_lista or ["TTP1", "TTP2"]
+    modelos = modelos_lista or ["TTP1"]
 
     # Se não fornecido solvers_lista, seleciona todos os solvers registrados
     if not solvers_lista:
@@ -141,7 +141,7 @@ def executar_orquestrador(
     print(f" • Processos Paralelos (Workers): {num_workers}")
     print(f" • Retomada Automática (Resume): {'DESATIVADA (--forcar)' if forcar else 'ATIVADA'}")
     print(f" • Solucionadores Alvo ({len(solvers)}): {', '.join(solvers[:6])}... (+{max(0, len(solvers)-6)} outros)")
-    print(f" • Modelos: {', '.join(modelos)}")
+    print(f" • Modelos: {', '.join(modelos)} (padrão: TTP1)")
     print("=" * 95 + "\n")
 
     t_inicio_total = time.time()
@@ -200,39 +200,36 @@ def executar_orquestrador(
         )
 
     t_total = time.time() - t_inicio_total
+
     print("\n" + "=" * 95)
     if gerenciador.interrompido:
-        print(f"{'EXECUÇÃO INTERROMPIDA COM SEGURANÇA VIA CTRL+C':^95}")
-        print("Todos os dados calculados até o momento foram preservados com integridade.")
+        print(f"{'EXECUÇÃO INTERROMPIDA PELO USUÁRIO':^95}")
+        print(f"Progresso preservado com segurança nos arquivos CSV.")
     else:
-        print(f"{'TODAS AS BATERIAS FORAM CONCLUÍDAS COM SUCESSO!':^95}")
-
-    print(f" • Tempo total transcorrido: {t_total:.2f}s ({t_total/60:.2f}min)")
-    print(f" • Resultados da Bateria de Soluções:")
-    print(f"     - Detalhes por execução: {csv_detalhado}")
-    print(f"     - Resumo estatístico (quartis, médias, tempos): {csv_estatisticas}")
-    print(f" • Resultados da Avaliação de R:")
-    print(f"     - Relatório geral consolidado: {_raiz / 'avaliacao_r' / 'resultados' / 'relatorio_geral_r.csv'}")
-    print(f"     - Curvas de R detalhadas: {_raiz / 'avaliacao_r' / 'resultados' / 'curvas_r_detalhadas.csv'}")
-    print(f"     - Detalhes estruturados (JSON): {_raiz / 'avaliacao_r' / 'resultados' / 'detalhes'}")
+        print(f"{'EXECUÇÃO CONCLUÍDA COM SUCESSO':^95}")
+    print(f" • Tempo total de execução: {t_total:.2f} segundos ({t_total/60:.1f} minutos)")
+    print(f" • Resultados das Soluções:   {csv_detalhado}")
+    print(f" • Estatísticas Consolidadas: {csv_estatisticas}")
+    if etapa in ["todas", "avaliacao_r"]:
+        print(f" • Resultados da Avaliação R: {_raiz / 'avaliacao_r' / 'resultados'}")
     print("=" * 95 + "\n")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Orquestrador Unificado de Baterias de Testes e Avaliação de R para o Traveling Thief Problem."
+        description="Orquestrador unificado de experimentos do Traveling Thief Problem (TTP)."
     )
     parser.add_argument(
         "--etapa",
         choices=["todas", "solucoes", "avaliacao_r"],
         default="todas",
-        help="Etapa a ser executada: 'todas', 'solucoes' (ttp_simulator) ou 'avaliacao_r' (padrão: todas)",
+        help="Etapas a executar: 'todas', apenas 'solucoes' (Etapa 1), ou apenas 'avaliacao_r' (Etapa 2)",
     )
     parser.add_argument(
         "--workers",
         type=int,
         default=None,
-        help="Número de processos paralelos (padrão: CPU count, máx 8)",
+        help="Número de processos paralelos (padrão: autodetectado com base nos núcleos da CPU)",
     )
     parser.add_argument(
         "--forcar",
@@ -254,8 +251,13 @@ def main():
     parser.add_argument(
         "--modelos",
         type=str,
-        default="TTP1,TTP2",
-        help="Modelos a avaliar separados por vírgula (padrão: TTP1,TTP2)",
+        default=None,
+        help="Modelos a avaliar separados por vírgula (padrão: TTP1; TTP2 é opcional)",
+    )
+    parser.add_argument(
+        "--incluir-ttp2",
+        action="store_true",
+        help="Habilita a execução conjunta de TTP2 além de TTP1 (por padrão, apenas TTP1 é executado)",
     )
     parser.add_argument(
         "--timeout-r",
@@ -290,7 +292,13 @@ def main():
     args = parser.parse_args()
 
     solv_list = [s.strip() for s in args.solvers.split(",")] if args.solvers else None
-    mod_list = [m.strip() for m in args.modelos.split(",")] if args.modelos else ["TTP1", "TTP2"]
+
+    if args.modelos:
+        mod_list = [m.strip() for m in args.modelos.split(",")]
+    elif args.incluir_ttp2:
+        mod_list = ["TTP1", "TTP2"]
+    else:
+        mod_list = ["TTP1"]
 
     executar_orquestrador(
         etapa=args.etapa,

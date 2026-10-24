@@ -1,4 +1,2 @@
 - Onde que fala que a cidade incial tem que ser a cidade 1?
 - Se não falar nada, a cidade incial/final deve ser aquela que menos contribuí para suas arestas adjacentes (queimada)
-
-- Na queimada, o caminho que ordena pelo fim, pode fazer tsp entre os vértices que não se coleta nenhum item

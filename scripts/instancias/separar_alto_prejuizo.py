@@ -38,15 +38,15 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-_raiz = Path(__file__).resolve().parent
+_raiz = Path(__file__).resolve().parents[2]
 _sim_path = _raiz / "ttp_simulator"
 if str(_raiz) not in sys.path:
     sys.path.insert(0, str(_raiz))
 if str(_sim_path) not in sys.path:
     sys.path.insert(0, str(_sim_path))
 
-from filtrar_instancias_lucro import analisar_instancia_lucro
-from normalizar_estatisticas import normalizar_grupo
+from scripts.instancias.filtrar_instancias_lucro import analisar_instancia_lucro
+from scripts.benchmark.normalizar_estatisticas import normalizar_grupo
 from src.scenarios.parser import InstanceParser
 
 

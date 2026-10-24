@@ -4,19 +4,29 @@ e comparação com as heurísticas de estado da arte do TTP.
 """
 
 import itertools
+import sys
 import time
-from pathlib import Path
 from collections import defaultdict
-from typing import Dict, Any
+from pathlib import Path
+from typing import Any, Dict
 
-from src.scenarios.parser import InstanceParser
-from src.solvers.queimada import QueimadaSolver
-from src.solvers.base import SolverRegistry
+# Configura caminhos para importação
+_raiz = Path(__file__).resolve().parents[2]
+_sim_path = _raiz / "ttp_simulator"
+if str(_raiz) not in sys.path:
+    sys.path.insert(0, str(_raiz))
+if str(_sim_path) not in sys.path:
+    sys.path.insert(0, str(_sim_path))
+
+import src.solvers  # Trigger registration
 from src.core.evaluator_ttp1 import avaliar_ttp1
+from src.scenarios.parser import InstanceParser
+from src.solvers.base import SolverRegistry
+from src.solvers.queimada import QueimadaSolver
 
 
 def executar_grid_search_queimada():
-    test_dir = Path("bateria_testes")
+    test_dir = _sim_path / "bateria_testes"
     instance_files = sorted(list(test_dir.glob("*.txt")))
 
     # Espaço de parâmetros da Queimada
@@ -54,7 +64,6 @@ def executar_grid_search_queimada():
     print(f"{'='*95}\n")
 
     # Estruturas para acumular estatísticas
-    # config_id -> lista de lucros
     lucros_por_config = defaultdict(list)
     tempos_viagem_por_config = defaultdict(list)
     tempos_cpu_por_config = defaultdict(list)
@@ -68,23 +77,14 @@ def executar_grid_search_queimada():
     inicio_total = time.perf_counter()
 
     for idx_inst, (nome_inst, instance) in enumerate(instancias, 1):
-        print(f"[{idx_inst}/{len(instancias)}] Processando {nome_inst} com {len(configuracoes)} variantes da Queimada...")
+        print(f"[{idx_inst}/{len(instancias)}] Avaliando em '{nome_inst}' ({len(instance.grafo.cidades)} cidades, {len(instance.itens)} itens)...")
         t_inst_0 = time.perf_counter()
 
         for idx_cfg, cfg in enumerate(configuracoes):
-            solver = QueimadaSolver(
-                temperatura=cfg["temperatura"],
-                dissipacao=cfg["dissipacao"],
-                direcao=cfg["direcao"],
-                selecao=cfg["selecao"],
-                metodo_construcao=cfg["metodo_construcao"],
-                ordem_selecao=cfg["ordem_selecao"],
-                refinamento=cfg["refinamento"],
-            )
-
+            solver = QueimadaSolver(**cfg)
             t0 = time.perf_counter()
             solucao = solver.solve(instance)
-            tempo_ms = (time.perf_counter() - t0) * 1000.0
+            t_ms = (time.perf_counter() - t0) * 1000.0
 
             res = avaliar_ttp1(instance, solucao)
             lucro = res["lucro_liquido_G"]
@@ -94,7 +94,7 @@ def executar_grid_search_queimada():
 
             lucros_por_config[idx_cfg].append(lucro)
             tempos_viagem_por_config[idx_cfg].append(tempo_v)
-            tempos_cpu_por_config[idx_cfg].append(tempo_ms)
+            tempos_cpu_por_config[idx_cfg].append(t_ms)
 
             linhas_csv.append({
                 "instancia": nome_inst,
@@ -104,7 +104,7 @@ def executar_grid_search_queimada():
                 "tempo_viagem": tempo_v,
                 "peso": peso,
                 "qtd_itens": qtd,
-                "tempo_ms": tempo_ms,
+                "tempo_ms": t_ms
             })
 
         t_inst_total = time.perf_counter() - t_inst_0
@@ -113,8 +113,8 @@ def executar_grid_search_queimada():
     tempo_total_grid = time.perf_counter() - inicio_total
     print(f"\nGrid Search concluído em {tempo_total_grid:.2f} segundos!\n")
 
-    # Salva CSV
-    results_dir = Path("results")
+    # Salva CSV na pasta central results/
+    results_dir = _raiz / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
     csv_file = results_dir / "grid_search_queimada.csv"
     with open(csv_file, "w", encoding="utf-8") as f:
@@ -143,6 +143,8 @@ def executar_grid_search_queimada():
             ]
             f.write(";".join(line) + "\n")
 
+    print(f"Resultados detalhados gravados em '{csv_file}'.\n")
+
     # Executa também os solvers de referência para a comparação final
     solvers_referencia = [
         "cosolver",
@@ -169,10 +171,7 @@ def executar_grid_search_queimada():
             referencia_tempos[s_name].append(r["tempo_viagem_f"])
             referencia_cpus[s_name].append(t_ms)
 
-    # ==============================================================
-    # ANÁLISE DOS RESULTADOS
-    # ==============================================================
-    # Calcula a média geral de cada configuração da Queimada
+    # Análise dos resultados
     medias_queimada = []
     for idx_cfg, cfg in enumerate(configuracoes):
         lucros = lucros_por_config[idx_cfg]
@@ -199,7 +198,7 @@ def executar_grid_search_queimada():
         print(f"{rank:<5} | {c['temperatura']:<14} | {c['dissipacao']:<14} | {c['direcao']:<12} | {c['metodo_construcao']:<10} | {c['selecao']:<16} | {c['ordem_selecao']:<10} | {str(c['refinamento']):<6} | {item['media_g']:>14.2f}")
     print("=" * 110)
 
-    # Análise marginal por parâmetro (efeito isolado de cada opção)
+    # Análise marginal por parâmetro
     def calcular_efeito_parametro(param_nome):
         valores = defaultdict(list)
         for item in medias_queimada:
@@ -219,7 +218,6 @@ def executar_grid_search_queimada():
 
     # Comparativo: Melhor Queimada vs Estado da Arte
     melhor_queimada = medias_queimada[0]
-    pior_queimada = medias_queimada[-1]
 
     print("\n" + "=" * 90)
     print(f"{'COMPARATIVO: MELHOR CONFIGURAÇÃO DA QUEIMADA vs ESTADO DA ARTE':^90}")

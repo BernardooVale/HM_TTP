@@ -7,7 +7,7 @@ if str(_raiz) not in sys.path:
     sys.path.insert(0, str(_raiz))
 
 import pytest
-from separar_alto_prejuizo import (
+from scripts.instancias.separar_alto_prejuizo import (
     calcular_estatisticas,
     auditar_instancias,
     filtrar_e_consolidar_resultados,

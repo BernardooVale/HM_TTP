@@ -32,7 +32,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 # Adiciona diretórios ao sys.path
-_raiz = Path(__file__).resolve().parent
+_raiz = Path(__file__).resolve().parents[2]
 _sim_path = _raiz / "ttp_simulator"
 if str(_raiz) not in sys.path:
     sys.path.insert(0, str(_raiz))
@@ -291,7 +291,7 @@ def executar_bateria_lucrativa(
     csv_estatisticas = output_stats or str(pasta_resultados / "comparativo_estatisticas_lucrativas.csv")
     csv_filtro = output_filtro or str(pasta_resultados / "filtro_instancias_lucrativas.csv")
 
-    modelos = modelos_lista or ["TTP1", "TTP2"]
+    modelos = modelos_lista or ["TTP1"]
 
     if not solvers_lista:
         solvers = [
@@ -413,8 +413,13 @@ def main():
     parser.add_argument(
         "--modelos",
         type=str,
-        default="TTP1,TTP2",
-        help="Modelos a avaliar separados por vírgula (padrão: 'TTP1,TTP2')",
+        default=None,
+        help="Modelos a avaliar separados por vírgula (padrão: TTP1; TTP2 é opcional)",
+    )
+    parser.add_argument(
+        "--incluir-ttp2",
+        action="store_true",
+        help="Inclui o modelo TTP2 além do TTP1",
     )
     parser.add_argument(
         "--max-cidades",
@@ -454,7 +459,12 @@ def main():
     args = parser.parse_args()
 
     solvers_lista = [s.strip() for s in args.solvers.split(",")] if args.solvers else None
-    modelos_lista = [m.strip() for m in args.modelos.split(",")] if args.modelos else ["TTP1", "TTP2"]
+    if args.modelos:
+        modelos_lista = [m.strip() for m in args.modelos.split(",")]
+    elif args.incluir_ttp2:
+        modelos_lista = ["TTP1", "TTP2"]
+    else:
+        modelos_lista = ["TTP1"]
 
     executar_bateria_lucrativa(
         workers=args.workers,

@@ -165,7 +165,7 @@ class BatchRunner:
     ):
         self.test_dir = Path(test_dir)
         self.solvers = solvers
-        self.models = models
+        self.models = models or ["TTP1"]
         self.runs = runs
         self.output_csv = output_csv
         self.output_stats_csv = output_stats_csv or str(Path(output_csv).parent / "comparativo_estatisticas_ttp1_ttp2.csv")

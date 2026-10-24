@@ -87,13 +87,26 @@ class TTPInstance:
     dimension: int = 0
     num_items: int = 0
 
+    @property
+    def num_cities(self) -> int:
+        return self.dimension if self.dimension > 0 else len(self.grafo.cidades)
+
 @dataclass
 class SolucaoTTP:
     rota: list[int]               # ordered list of city IDs to visit
     plano_coleta: dict[int, list[int]]  # city_id -> list of item IDs to collect there
-    
+
+    @property
+    def tour(self) -> list[int]:
+        return self.rota
+
+    @property
+    def picking_plan(self) -> dict[int, list[int]]:
+        return self.plano_coleta
+
     def itens_coletados_ids(self) -> list[int]:
         all_ids = []
         for ids in self.plano_coleta.values():
-            all_ids.extend(ids)
+            if isinstance(ids, (list, tuple, set)):
+                all_ids.extend(ids)
         return all_ids
