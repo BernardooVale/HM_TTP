@@ -17,12 +17,12 @@ class FastTTPEvaluator:
     """
 
     def __init__(self, instance: TTPInstance, rota: List[int], modelo: str = "TTP1"):
-        self.instance = instance
-        self.rota = list(rota)
-        self.n = len(self.rota)
-        self.modelo = modelo
-        self.cidade_idx: Dict[int, int] = {self.rota[i]: i for i in range(self.n)}
-        self.itens_by_id: Dict[int, Item] = {it.id: it for it in instance.itens}
+        self.instance                       = instance
+        self.rota                           = list(rota)
+        self.num_cidades_percorridas        = len(self.rota)
+        self.modelo                         = modelo
+        self.cidade_idx: Dict[int, int]     = {self.rota[i]: i for i in range(self.num_cidades_percorridas)}
+        self.itens_by_id: Dict[int, Item]   = {it.id: it for it in instance.itens}
 
         # Cache direto de propriedades dos itens para evitar overhead de dataclass
         self.item_cidade_idx: Dict[int, int] = {
@@ -35,8 +35,8 @@ class FastTTPEvaluator:
 
         # Distâncias fixas das pernas da rota
         self.distancias: List[float] = [
-            instance.grafo.distancia(self.rota[i], self.rota[(i + 1) % self.n])
-            for i in range(self.n)
+            instance.grafo.distancia(self.rota[i], self.rota[(i + 1) % self.num_cidades_percorridas])
+            for i in range(self.num_cidades_percorridas)
         ]
 
         self.cap_mochila = max(instance.capacidade_mochila, 1e-6)
@@ -47,14 +47,14 @@ class FastTTPEvaluator:
         self.fator_velocidade = (self.v_max - self.v_min) / self.cap_mochila
 
         # Estado incremental para busca local ultrarrápida
-        self.peso_por_cidade: List[float] = [0.0] * self.n
+        self.peso_por_cidade: List[float] = [0.0] * self.num_cidades_percorridas
         self.itens_coletados: Set[int] = set()
         self.valor_bruto_atual: float = 0.0
         self.peso_total_atual: float = 0.0
 
     def inicializar_estado(self, itens_ids: Optional[Set[int]] = None) -> None:
         """Inicializa o estado interno para avaliações incrementais."""
-        self.peso_por_cidade = [0.0] * self.n
+        self.peso_por_cidade = [0.0] * self.num_cidades_percorridas
         self.itens_coletados = set()
         self.valor_bruto_atual = 0.0
         self.peso_total_atual = 0.0
@@ -88,11 +88,11 @@ class FastTTPEvaluator:
         """Calcula o lucro líquido G para o estado incremental atual em O(N)."""
         mod = modelo or self.modelo
         if mod == "TTP2":
-            tempo_coleta_cidade = [0.0] * self.n
+            tempo_coleta_cidade = [0.0] * self.num_cidades_percorridas
             tempo_viagem = 0.0
             peso_acc = 0.0
 
-            for i in range(self.n):
+            for i in range(self.num_cidades_percorridas):
                 tempo_coleta_cidade[i] = tempo_viagem
                 peso_acc += self.peso_por_cidade[i]
                 vel = self.v_max - peso_acc * self.fator_velocidade
@@ -117,7 +117,7 @@ class FastTTPEvaluator:
             peso_acc = 0.0
             tempo_viagem = 0.0
 
-            for i in range(self.n):
+            for i in range(self.num_cidades_percorridas):
                 peso_acc += self.peso_por_cidade[i]
                 vel = self.v_max - peso_acc * self.fator_velocidade
                 if vel < self.v_min:
@@ -135,7 +135,7 @@ class FastTTPEvaluator:
         - TTP2: G = soma(valor_item - ceil((tempo_fim - tempo_coleta) / C))
         """
         mod = modelo or self.modelo
-        peso_por_cidade = [0.0] * self.n
+        peso_por_cidade = [0.0] * self.num_cidades_percorridas
 
         for it_id in itens_coletados_ids:
             idx = self.item_cidade_idx.get(it_id)
@@ -143,11 +143,11 @@ class FastTTPEvaluator:
                 peso_por_cidade[idx] += self.item_peso[it_id]
 
         if mod == "TTP2":
-            tempo_coleta_cidade = [0.0] * self.n
+            tempo_coleta_cidade = [0.0] * self.num_cidades_percorridas
             tempo_viagem = 0.0
             peso_acc = 0.0
 
-            for i in range(self.n):
+            for i in range(self.num_cidades_percorridas):
                 tempo_coleta_cidade[i] = tempo_viagem
                 peso_acc += peso_por_cidade[i]
                 vel = self.v_max - peso_acc * self.fator_velocidade
@@ -174,7 +174,7 @@ class FastTTPEvaluator:
             peso_acc = 0.0
             tempo_viagem = 0.0
 
-            for i in range(self.n):
+            for i in range(self.num_cidades_percorridas):
                 peso_acc += peso_por_cidade[i]
                 vel = self.v_max - peso_acc * self.fator_velocidade
                 if vel < self.v_min:

@@ -49,15 +49,15 @@ class Grafo:
             return 0.0
         if self.edge_weight_type in ('EUC_2D', 'CEIL_2D'):
             if self._is_dense_index:
-                dx = self._x[id1] - self._x[id2]
-                dy = self._y[id1] - self._y[id2]
+                distancia_x = self._x[id1] - self._x[id2]
+                distancia_y = self._y[id1] - self._y[id2]
             else:
-                c1 = self._coords[id1]
-                c2 = self._coords[id2]
-                dx = c1[0] - c2[0]
-                dy = c1[1] - c2[1]
-            d = math.sqrt(dx * dx + dy * dy)
-            return float(math.ceil(d)) if self.edge_weight_type == 'CEIL_2D' else d
+                coordenada_1 = self._coords[id1]
+                coordenada_2 = self._coords[id2]
+                distancia_x = coordenada_1[0] - coordenada_2[0]
+                distancia_y = coordenada_1[1] - coordenada_2[1]
+            distancia = math.sqrt(distancia_x * distancia_x + distancia_y * distancia_y)
+            return float(math.ceil(distancia)) if self.edge_weight_type == 'CEIL_2D' else distancia
         else:  # EXPLICIT
             key = (min(id1, id2), max(id1, id2))
             return self.distancias[key]

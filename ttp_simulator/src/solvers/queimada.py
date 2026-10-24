@@ -14,14 +14,14 @@ def resolver_knapsack_01_exato(itens: List[Item], capacidade: float) -> Tuple[fl
     if not itens or capacidade <= 0:
         return 0.0, []
 
-    peso_total = sum(it.peso for it in itens)
+    peso_total = sum(item.peso for item in itens)
     if peso_total <= capacidade:
-        return sum(it.valor for it in itens), list(itens)
+        return sum(item.valor for item in itens), list(itens)
 
     # Ordena por densidade decrescente para limites superiores eficientes
     itens_ordenados = sorted(
         itens,
-        key=lambda it: it.valor / it.peso if it.peso > 0 else float("inf"),
+        key=lambda item: item.valor / item.peso if item.peso > 0 else float("inf"),
         reverse=True,
     )
     n = len(itens_ordenados)
@@ -33,13 +33,13 @@ def resolver_knapsack_01_exato(itens: List[Item], capacidade: float) -> Tuple[fl
         limite = valor_atual
         peso = peso_atual
         for i in range(idx, n):
-            it = itens_ordenados[i]
-            if peso + it.peso <= capacidade:
-                peso += it.peso
-                limite += it.valor
+            item = itens_ordenados[i]
+            if peso + item.peso <= capacidade:
+                peso += item.peso
+                limite += item.valor
             else:
-                if it.peso > 0:
-                    limite += (capacidade - peso) * (it.valor / it.peso)
+                if item.peso > 0:
+                    limite += (capacidade - peso) * (item.valor / item.peso)
                 break
         return limite
 
@@ -54,12 +54,12 @@ def resolver_knapsack_01_exato(itens: List[Item], capacidade: float) -> Tuple[fl
         if limite_superior(idx, peso_atual, valor_atual) <= melhor_valor[0]:
             return
 
-        it = itens_ordenados[idx]
+        item = itens_ordenados[idx]
 
         # Ramo 1: incluir o item (se couber)
-        if peso_atual + it.peso <= capacidade:
-            selecionados.append(it)
-            branch_and_bound(idx + 1, peso_atual + it.peso, valor_atual + it.valor, selecionados)
+        if peso_atual + item.peso <= capacidade:
+            selecionados.append(item)
+            branch_and_bound(idx + 1, peso_atual + item.peso, valor_atual + item.valor, selecionados)
             selecionados.pop()
 
         # Ramo 2: não incluir o item
@@ -75,18 +75,18 @@ def resolver_knapsack_guloso(itens: List[Item], capacidade: float) -> Tuple[floa
     """
     itens_ordenados = sorted(
         itens,
-        key=lambda it: it.valor / it.peso if it.peso > 0 else float("inf"),
+        key=lambda item: item.valor / item.peso if item.peso > 0 else float("inf"),
         reverse=True,
     )
     peso_atual = 0.0
     valor_total = 0.0
     selecionados: List[Item] = []
 
-    for it in itens_ordenados:
-        if peso_atual + it.peso <= capacidade:
-            peso_atual += it.peso
-            valor_total += it.valor
-            selecionados.append(it)
+    for item in itens_ordenados:
+        if peso_atual + item.peso <= capacidade:
+            peso_atual += item.peso
+            valor_total += item.valor
+            selecionados.append(item)
 
     return valor_total, selecionados
 
@@ -341,7 +341,7 @@ class QueimadaSolver(BaseSolver):
                 continue
 
             if self.temperatura_modo == "total_value":
-                temperaturas[cid] = sum(it.valor for it in cidade.itens)
+                temperaturas[cid] = sum(item.valor for item in cidade.itens)
             elif self.temperatura_modo == "knapsack_exact":
                 val, _ = resolver_knapsack_01_exato(cidade.itens, instance.capacidade_mochila)
                 temperaturas[cid] = val
@@ -367,32 +367,37 @@ class QueimadaSolver(BaseSolver):
 
         if self.dissipacao_modo == "adjacent_only":
             for i in range(n):
-                u = cidades[i]
-                tu = temperaturas.get(u, 0.0)
+                cidade_atual = cidades[i]
+                temperatura_cidade = temperaturas.get(cidade_atual, 0.0)
+                
                 for j in range(i + 1, n):
-                    v = cidades[j]
-                    tv = temperaturas.get(v, 0.0)
-                    e = (u, v) if u < v else (v, u)
-                    if tu > 0.0 or tv > 0.0:
-                        d = instance.grafo.distancia(u, v)
-                        calor[e] = (tu + tv) / max(d, 0.001)
+                    prox_cidade = cidades[j]
+                    temperatura_prox_cidade = temperaturas.get(prox_cidade, 0.0)
+                    aresta = (cidade_atual, prox_cidade) if cidade_atual < prox_cidade else (prox_cidade, cidade_atual)
+                    
+                    if temperatura_cidade > 0.0 or temperatura_prox_cidade > 0.0:
+                        distancia = instance.grafo.distancia(cidade_atual, prox_cidade)
+                        calor[aresta] = (temperatura_cidade + temperatura_prox_cidade) / max(distancia, 0.001)
+                        
                     else:
-                        calor[e] = 0.0
+                        calor[aresta] = 0.0
 
         elif self.dissipacao_modo == "bfs":
             # Forma fechada exata O(N^2) para grafo completo:
             # Para cada nó s, level[s]=0 e level[v]=1 para todo v != s.
             # h = 1 para s in {u, v} e h = 2 para s not in {u, v}.
             T_total = sum(temperaturas.values())
+            
             for i in range(n):
-                u = cidades[i]
-                tu = temperaturas.get(u, 0.0)
+                cidade = cidades[i]
+                temperatura_cidade = temperaturas.get(cidade, 0.0)
+                
                 for j in range(i + 1, n):
-                    v = cidades[j]
-                    tv = temperaturas.get(v, 0.0)
-                    d = instance.grafo.distancia(u, v)
-                    e = (u, v) if u < v else (v, u)
-                    calor[e] = (tu + tv + T_total) / (2.0 * (1.0 + d))
+                    prox_cidade = cidades[j]
+                    temperatura_prox_cidade = temperaturas.get(prox_cidade, 0.0)
+                    distancia = instance.grafo.distancia(cidade, prox_cidade)
+                    aresta = (cidade, prox_cidade) if cidade < prox_cidade else (prox_cidade, cidade)
+                    calor[aresta] = (temperatura_cidade + temperatura_prox_cidade + T_total) / (2.0 * (1.0 + distancia))
 
         elif self.dissipacao_modo == "dijkstra":
             for s in cidades:
@@ -680,16 +685,16 @@ class QueimadaSolver(BaseSolver):
 
         elif self.selecao_modo == "knapsack_relative":
             itens_adaptados = [
-                Item(id=it.id, peso=it.peso, valor=lucro, cidade_origem=it.cidade_origem)
-                for lucro, it in itens_com_lucro
+                Item(id=item.id, peso=item.peso, valor=lucro, cidade_origem=item.cidade_origem)
+                for lucro, item in itens_com_lucro
             ]
             _, selecionados = resolver_knapsack_01_exato(
                 itens_adaptados, instance.capacidade_mochila
             )
-            for it in selecionados:
-                if it.cidade_origem not in plano_coleta:
-                    plano_coleta[it.cidade_origem] = []
-                plano_coleta[it.cidade_origem].append(it.id)
+            for item in selecionados:
+                if item.cidade_origem not in plano_coleta:
+                    plano_coleta[item.cidade_origem] = []
+                plano_coleta[item.cidade_origem].append(item.id)
 
         else:
             raise ValueError(f"Modo de seleção de itens inválido: {self.selecao_modo}")

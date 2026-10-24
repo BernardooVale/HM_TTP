@@ -253,7 +253,7 @@ def executar_grid_search(
     top_n: int = 15,
     arquivo_csv: Optional[str] = None,
 ):
-    """Executa o Grid Search paralelo completo."""
+    """Executa o Grid Search paralelo com salvamento incremental atômico e retomada automática (Resume)."""
     workers = workers or os.cpu_count() or 4
     instancias = resolver_instancias(
         opcao_instancias=instancias_modo,
@@ -270,6 +270,74 @@ def executar_grid_search(
     total_configs = len(configuracoes)
     total_tarefas = total_instancias * total_configs
 
+    # Define caminho de saída do CSV logo no início para suportar Resume
+    if arquivo_csv is None:
+        caminho_results = _raiz / "results"
+        caminho_results.mkdir(parents=True, exist_ok=True)
+        arquivo_csv = str(caminho_results / f"grid_search_queimada_{espaco}.csv")
+
+    arquivo_csv_path = Path(arquivo_csv).resolve()
+
+    # Estruturas de agregação e conjunto de tarefas concluídas (para Resume)
+    concluidas_set: set = set()
+    lucros_por_config: Dict[int, List[float]] = defaultdict(list)
+    tempos_v_por_config: Dict[int, List[float]] = defaultdict(list)
+    tempos_cpu_por_config: Dict[int, List[float]] = defaultdict(list)
+
+    headers = [
+        "config_id",
+        "instancia",
+        "lucro_G",
+        "tempo_viagem",
+        "peso",
+        "qtd_itens",
+        "tempo_cpu_ms",
+    ] + list(configuracoes[0].keys())
+
+    modo_abertura = "w"
+    escrever_cabecalho = True
+
+    # Leitura prévia do CSV para retomada automática (Resume)
+    if arquivo_csv_path.exists() and arquivo_csv_path.stat().st_size > 0:
+        try:
+            with open(arquivo_csv_path, "r", encoding="utf-8", errors="ignore") as f_prev:
+                primeira = f_prev.readline()
+                delimitador = ";" if ";" in primeira else ","
+                f_prev.seek(0)
+                reader = csv.DictReader(f_prev, delimiter=delimitador)
+                for row in reader:
+                    try:
+                        c_id = int(row["config_id"])
+                        inst_nome = row["instancia"].strip()
+                        g = float(row["lucro_G"])
+                        tv = float(row["tempo_viagem"])
+                        cpu = float(row["tempo_cpu_ms"])
+
+                        concluidas_set.add((c_id, inst_nome))
+                        lucros_por_config[c_id].append(g)
+                        tempos_v_por_config[c_id].append(tv)
+                        tempos_cpu_por_config[c_id].append(cpu)
+                    except (ValueError, KeyError):
+                        continue
+
+            if concluidas_set:
+                modo_abertura = "a"
+                escrever_cabecalho = False
+                print(f"🔄 Retomada Automática (Resume) ativada:")
+                print(f"   {len(concluidas_set):,} execuções prévias carregadas com sucesso de:\n   {arquivo_csv_path}")
+        except Exception as e:
+            print(f"⚠️ Aviso ao carregar CSV existente para retomada: {e}")
+
+    # Monta a lista apenas com as tarefas ainda pendentes
+    tarefas = []
+    for cfg_id, cfg in enumerate(configuracoes):
+        for inst_path in instancias:
+            if (cfg_id, inst_path.name) not in concluidas_set:
+                tarefas.append((str(inst_path.resolve()), cfg, cfg_id, modelo))
+
+    total_pendentes = len(tarefas)
+    concluidas_historico = len(concluidas_set)
+
     print("\n" + "=" * 115)
     print(f"{'GRID SEARCH PARALELO DE ALTO RENDIMENTO - HEURÍSTICA DA QUEIMADA':^115}")
     print("=" * 115)
@@ -277,74 +345,119 @@ def executar_grid_search(
     print(f"• Instâncias alvo:      {total_instancias} arquivos de teste")
     print(f"• Modelo avaliado:      {modelo}")
     print(f"• Processamento:        {workers} workers paralelos (Multiprocessamento nativo)")
-    print(f"• Total de execuções:   {total_tarefas:,} tarefas")
+    print(f"• Total do grid search: {total_tarefas:,} tarefas")
+    print(f"• Já concluídas (disco):{concluidas_historico:,} tarefas ({concluidas_historico / max(total_tarefas, 1) * 100:.1f}%)")
+    print(f"• Pendentes a executar: {total_pendentes:,} tarefas")
+    print(f"• Destino dos dados:    {arquivo_csv_path}")
     print("=" * 115 + "\n")
 
-    # Monta a lista completa de tarefas
-    tarefas = []
-    for cfg_id, cfg in enumerate(configuracoes):
-        for inst_path in instancias:
-            tarefas.append((str(inst_path.resolve()), cfg, cfg_id, modelo))
-
-    # Estruturas de agregação
-    lucros_por_config: Dict[int, List[float]] = defaultdict(list)
-    tempos_v_por_config: Dict[int, List[float]] = defaultdict(list)
-    tempos_cpu_por_config: Dict[int, List[float]] = defaultdict(list)
-    registros_csv: List[Dict[str, Any]] = []
-
-    concluidas = 0
+    concluidas_sessao = 0
     t_inicio = time.perf_counter()
     ultimo_print = t_inicio
+    interrompido = False
 
-    print("🚀 Iniciando processamento paralelo em lote...\n")
+    if total_pendentes > 0:
+        print("🚀 Iniciando processamento com salvamento incremental atômico...\n")
 
-    try:
-        # Usa chunksize para minimizar custo de IPC
-        chunksize = max(1, min(64, total_tarefas // (workers * 4)))
-        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
-            resultados = executor.map(_worker_executar_config, tarefas, chunksize=chunksize)
+        # Abre o arquivo CSV para gravação incremental (append ou write com cabeçalho)
+        with open(arquivo_csv_path, modo_abertura, newline="", encoding="utf-8") as f_csv:
+            csv_writer = csv.DictWriter(f_csv, fieldnames=headers)
+            if escrever_cabecalho:
+                csv_writer.writeheader()
+                f_csv.flush()
 
-            for res in resultados:
-                concluidas += 1
-                c_id = res["cfg_id"]
-                lucros_por_config[c_id].append(res["lucro_G"])
-                tempos_v_por_config[c_id].append(res["tempo_viagem"])
-                tempos_cpu_por_config[c_id].append(res["tempo_cpu_ms"])
+            # Janela deslizante de tarefas ativas para consumo de memória controlado e resposta imediata ao Ctrl+C
+            MAX_PENDENTES = max(workers * 4, 32)
+            tarefas_iter = iter(tarefas)
+            futuros: Dict[concurrent.futures.Future, Tuple] = {}
 
-                cfg_ref = configuracoes[c_id]
-                registros_csv.append({
-                    "config_id": c_id,
-                    "instancia": res["instancia"],
-                    "lucro_G": res["lucro_G"],
-                    "tempo_viagem": res["tempo_viagem"],
-                    "peso": res["peso"],
-                    "qtd_itens": res["qtd_itens"],
-                    "tempo_cpu_ms": res["tempo_cpu_ms"],
-                    **cfg_ref,
-                })
+            with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
+                # Enfileira primeiras tarefas
+                for t in itertools.islice(tarefas_iter, MAX_PENDENTES):
+                    fut = executor.submit(_worker_executar_config, t)
+                    futuros[fut] = t
 
-                agora = time.perf_counter()
-                if agora - ultimo_print >= 1.0 or concluidas == total_tarefas:
-                    ultimo_print = agora
-                    decorrido = agora - t_inicio
-                    taxa = concluidas / max(decorrido, 0.001)
-                    restante = (total_tarefas - concluidas) / max(taxa, 0.001)
-                    pct = (concluidas / total_tarefas) * 100.0
-                    print(
-                        f"\rProgresso: [{concluidas:,}/{total_tarefas:,}] ({pct:5.1f}%) | "
-                        f"Velocidade: {taxa:6.1f} exec/s | "
-                        f"Decorrido: {decorrido:5.1f}s | "
-                        f"ETA: {restante:5.1f}s",
-                        end="",
-                        flush=True,
-                    )
+                while futuros:
+                    try:
+                        done, _ = concurrent.futures.wait(
+                            futuros.keys(), return_when=concurrent.futures.FIRST_COMPLETED
+                        )
+                        for fut in done:
+                            t = futuros.pop(fut)
+                            try:
+                                res = fut.result()
+                                if res:
+                                    c_id = res["cfg_id"]
+                                    lucros_por_config[c_id].append(res["lucro_G"])
+                                    tempos_v_por_config[c_id].append(res["tempo_viagem"])
+                                    tempos_cpu_por_config[c_id].append(res["tempo_cpu_ms"])
 
-    except KeyboardInterrupt:
-        print("\n\n⚠️ Interrupção manual detectada (Ctrl+C). Agregando resultados concluídos até o momento...")
+                                    cfg_ref = configuracoes[c_id]
+                                    linha_csv = {
+                                        "config_id": c_id,
+                                        "instancia": res["instancia"],
+                                        "lucro_G": res["lucro_G"],
+                                        "tempo_viagem": res["tempo_viagem"],
+                                        "peso": res["peso"],
+                                        "qtd_itens": res["qtd_itens"],
+                                        "tempo_cpu_ms": res["tempo_cpu_ms"],
+                                        **cfg_ref,
+                                    }
+                                    # Gravação incremental e flush direto no disco
+                                    csv_writer.writerow(linha_csv)
+                                    f_csv.flush()
+
+                                    concluidas_sessao += 1
+                                    concluidas_total = concluidas_historico + concluidas_sessao
+
+                                    agora = time.perf_counter()
+                                    if agora - ultimo_print >= 0.5 or concluidas_sessao == total_pendentes:
+                                        ultimo_print = agora
+                                        decorrido = agora - t_inicio
+                                        taxa = concluidas_sessao / max(decorrido, 0.001)
+                                        restante = (total_pendentes - concluidas_sessao) / max(taxa, 0.001)
+                                        pct = (concluidas_total / max(total_tarefas, 1)) * 100.0
+                                        print(
+                                            f"\rProgresso: [{concluidas_total:,}/{total_tarefas:,}] ({pct:5.1f}%) | "
+                                            f"Sessão: +{concluidas_sessao:,} | "
+                                            f"Velocidade: {taxa:6.1f} exec/s | "
+                                            f"ETA: {int(restante // 60)}m{int(restante % 60):02d}s",
+                                            end="",
+                                            flush=True,
+                                        )
+                            except Exception as exc:
+                                print(f"\n[FALHA NA TAREFA {t[0]}]: {exc}")
+
+                            # Submete a próxima tarefa caso não tenha ocorrido Ctrl+C
+                            if not interrompido:
+                                prox = next(tarefas_iter, None)
+                                if prox is not None:
+                                    novo_fut = executor.submit(_worker_executar_config, prox)
+                                    futuros[novo_fut] = prox
+
+                    except KeyboardInterrupt:
+                        print("\n\n" + "!" * 95)
+                        print("⚠️  INTERRUPÇÃO MANUAL SOLICITADA (Ctrl+C)")
+                        print("Cancelando tarefas pendentes na fila do pool de processos...")
+                        print(f"Todas as {concluidas_historico + concluidas_sessao:,} execuções finalizadas já foram salvas com segurança no disco!")
+                        print(f"Arquivo CSV: {arquivo_csv_path}")
+                        print("Quando desejar continuar, basta rodar o mesmo comando novamente.")
+                        print("!" * 95)
+                        interrompido = True
+                        for f_pendente in list(futuros.keys()):
+                            f_pendente.cancel()
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+    else:
+        print("🎉 Todas as tarefas deste grid search já estão concluídas e salvas no disco!")
 
     t_total = time.perf_counter() - t_inicio
+    total_final = concluidas_historico + concluidas_sessao
     print(f"\n\n{'='*115}")
-    print(f"✨ Concluído em {t_total:.2f}s ({concluidas:,} execuções finalizadas | Média: {concluidas / max(t_total, 0.001):.1f} exec/s)")
+    if interrompido:
+        print(f"🛑 Sessão interrompida em {t_total:.2f}s (+{concluidas_sessao:,} novas tarefas salvas | Total acumulado: {total_final:,})")
+    else:
+        print(f"✨ Concluído em {t_total:.2f}s ({total_final:,} execuções consolidadas | Taxa da sessão: {concluidas_sessao / max(t_total, 0.001):.1f} exec/s)")
     print("=" * 115)
 
     if not lucros_por_config:
@@ -416,22 +529,8 @@ def executar_grid_search(
         for val, m_val in itens_param:
             print(f"   • {str(val):<22} : {m_val:>14.2f}")
 
-    # Salva CSV se solicitado ou por padrão em results/
-    if arquivo_csv is None:
-        caminho_results = _raiz / "results"
-        caminho_results.mkdir(parents=True, exist_ok=True)
-        arquivo_csv = str(caminho_results / f"grid_search_queimada_{espaco}.csv")
-
-    if registros_csv:
-        try:
-            with open(arquivo_csv, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=list(registros_csv[0].keys()))
-                writer.writeheader()
-                writer.writerows(registros_csv)
-            print(f"\n📁 Resultados completos e detalhados exportados com sucesso para:\n   {arquivo_csv}")
-        except Exception as e:
-            print(f"\n⚠️ Falha ao salvar CSV: {e}")
-
+    # Confirmação de persistência
+    print(f"\n📁 Todos os resultados consolidados foram gravados no disco em:\n   {arquivo_csv_path}")
     print("=" * 115 + "\n")
 
 
