@@ -33,6 +33,7 @@ def test_solver_registry_listar():
     assert "greedy" in solvers
     assert "local_search" in solvers
     assert "heuristic_37" in solvers
+    assert "queimada" in solvers
 
 @pytest.fixture
 def sample_instance():
@@ -65,7 +66,16 @@ def sample_instance():
         num_items=4
     )
 
-@pytest.mark.parametrize("solver_name", ["random", "greedy", "heuristic_37", "local_search"])
+@pytest.mark.parametrize("solver_name", [
+    "random", "greedy", "heuristic_37", "heuristic_37_refinada", "heuristic_37_simetrica",
+    "heuristic_37_ttp2", "local_search", "queimada", "queimada_adj", "queimada_bfs",
+    "queimada_inicio", "queimada_kp", "queimada_exact", "queimada_kruskal",
+    "queimada_reversa", "queimada_refinada", "queimada_reversa_refinada", "queimada_legacy",
+    "queimada_com_2opt", "queimada_sem_2opt", "queimada_com_afinidade", "queimada_sem_afinidade",
+    "queimada_regime_r", "queimada_ttp2", "queimada_backward_arestas", "queimada_backward_sem_2opt",
+    "pack_iterative", "cosolver",
+    "s2_heuristic", "s2_refinada", "s5_heuristic", "s5_refinada"
+])
 def test_registered_solvers_produce_valid_solution(solver_name, sample_instance):
     solver = SolverRegistry.get(solver_name)
     solucao = solver.solve(sample_instance)
@@ -87,3 +97,49 @@ def test_registered_solvers_produce_valid_solution(solver_name, sample_instance)
             peso_total += itens_dict[i_id].peso
             
     assert peso_total <= sample_instance.capacidade_mochila
+
+@pytest.mark.parametrize("temp", ["total_value", "knapsack_exact", "knapsack_greedy"])
+@pytest.mark.parametrize("diss", ["adjacent_only", "dijkstra", "bfs"])
+@pytest.mark.parametrize("direcao", ["calor_final", "calor_inicio"])
+@pytest.mark.parametrize("selecao", ["greedy_relative", "knapsack_relative"])
+def test_queimada_all_variations(temp, diss, direcao, selecao, sample_instance):
+    from src.solvers.queimada import QueimadaSolver
+    solver = QueimadaSolver(
+        temperatura=temp,
+        dissipacao=diss,
+        direcao=direcao,
+        selecao=selecao
+    )
+    solucao = solver.solve(sample_instance)
+    assert len(solucao.rota) == 4
+    assert solucao.rota[0] == 1
+    assert set(solucao.rota) == {1, 2, 3, 4}
+    peso_total = sum(
+        sample_instance.itens[it_id - 1].peso
+        for it_ids in solucao.plano_coleta.values()
+        for it_id in it_ids
+    )
+    assert peso_total <= sample_instance.capacidade_mochila
+
+
+def test_queimada_otimizar_buracos(sample_instance):
+    from src.solvers.queimada import QueimadaSolver, otimizar_trechos_vazios
+    
+    # Rota intencionalmente com cruzamento em cidades vazias
+    rota = [1, 4, 3, 2] # Cidades 3 e 4 vazias
+    plano = {2: [1]} # Apenas cidade 2 tem coleta
+    
+    rota_otimizada = otimizar_trechos_vazios(sample_instance, rota, plano)
+    assert len(rota_otimizada) == 4
+    assert rota_otimizada[0] == 1
+    assert set(rota_otimizada) == {1, 2, 3, 4}
+    
+    solver = QueimadaSolver(otimizar_buracos=True)
+    sol = solver.solve(sample_instance)
+    assert len(sol.rota) == 4
+    assert sol.rota[0] == 1
+    assert "queimada_com_buracos" in SolverRegistry.listar()
+    assert "queimada_backward_buracos" in SolverRegistry.listar()
+    assert "queimada_backward_sem_2opt_buracos" in SolverRegistry.listar()
+
+

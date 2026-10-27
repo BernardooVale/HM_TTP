@@ -1,59 +1,286 @@
 import math
-from typing import Dict, List
-from src.core.models import TTPInstance, SolucaoTTP, Item
+from typing import Dict, List, Optional
+from src.core.models import TTPInstance, SolucaoTTP, Item, Grafo
 from src.solvers.base import BaseSolver, SolverRegistry
+
+
+def resolver_tsp_farthest_insertion(grafo: Grafo) -> List[int]:
+    """
+    Resolve o TSP utilizando a heurística Farthest Insertion.
+    Retorna a rota em ciclo fechado iniciando na cidade 1.
+    """
+    cidades = list(grafo.cidades.keys())
+    n = len(cidades)
+    if n <= 2:
+        idx_1 = cidades.index(1) if 1 in cidades else 0
+        return cidades[idx_1:] + cidades[:idx_1]
+
+    # Encontra o par de cidades mais distante para inicializar o subtour
+    max_d = -1.0
+    u_init, v_init = cidades[0], cidades[1]
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = grafo.distancia(cidades[i], cidades[j])
+            if d > max_d:
+                max_d = d
+                u_init, v_init = cidades[i], cidades[j]
+
+    subtour = [u_init, v_init]
+    nao_visitadas = set(cidades)
+    nao_visitadas.discard(u_init)
+    nao_visitadas.discard(v_init)
+
+    while nao_visitadas:
+        # Encontra a cidade k não visitada cuja distância mínima ao subtour é MÁXIMA
+        best_k = None
+        max_min_d = -1.0
+        for k in nao_visitadas:
+            min_d = min(grafo.distancia(k, node) for node in subtour)
+            if min_d > max_min_d:
+                max_min_d = min_d
+                best_k = k
+
+        # Encontra a melhor posição de inserção (menor acréscimo de custo)
+        best_pos = 0
+        min_cost_inc = float("inf")
+        m = len(subtour)
+        for i in range(m):
+            u = subtour[i]
+            v = subtour[(i + 1) % m]
+            cost_inc = grafo.distancia(u, best_k) + grafo.distancia(best_k, v) - grafo.distancia(u, v)
+            if cost_inc < min_cost_inc:
+                min_cost_inc = cost_inc
+                best_pos = i + 1
+
+        subtour.insert(best_pos, best_k)
+        nao_visitadas.remove(best_k)
+
+    # Rotaciona para iniciar na cidade 1
+    idx_1 = subtour.index(1)
+    return subtour[idx_1:] + subtour[:idx_1]
+
+
+def resolver_tsp_multistart_nn(grafo: Grafo) -> List[int]:
+    """
+    Resolve o TSP executando o vizinho mais próximo a partir de cada cidade
+    e seleciona a rota de menor custo total, rotacionando para iniciar na cidade 1.
+    """
+    cidades = list(grafo.cidades.keys())
+    n = len(cidades)
+    melhor_rota = list(cidades)
+    melhor_dist = float("inf")
+
+    for start in cidades:
+        nao_vis = set(cidades)
+        nao_vis.remove(start)
+        rota = [start]
+        atual = start
+        while nao_vis:
+            prox = min(nao_vis, key=lambda c: grafo.distancia(atual, c))
+            rota.append(prox)
+            nao_vis.remove(prox)
+            atual = prox
+
+        dist_total = sum(grafo.distancia(rota[i], rota[(i + 1) % n]) for i in range(n))
+        if dist_total < melhor_dist:
+            melhor_dist = dist_total
+            idx_1 = rota.index(1)
+            melhor_rota = rota[idx_1:] + rota[:idx_1]
+
+    return melhor_rota
+
+
+def obter_melhor_rota_tsp(grafo: Grafo) -> List[int]:
+    """
+    Compara Farthest Insertion e Multi-start Nearest Neighbor, retornando
+    o ciclo hamiltoniano de menor distância total com início na cidade 1.
+    """
+    rota_fi = resolver_tsp_farthest_insertion(grafo)
+    rota_nn = resolver_tsp_multistart_nn(grafo)
+
+    n = len(grafo.cidades)
+    dist_fi = sum(grafo.distancia(rota_fi[i], rota_fi[(i + 1) % n]) for i in range(n))
+    dist_nn = sum(grafo.distancia(rota_nn[i], rota_nn[(i + 1) % n]) for i in range(n))
+
+    return rota_fi if dist_fi <= dist_nn else rota_nn
+
 
 @SolverRegistry.register
 class Heuristic37Solver(BaseSolver):
+    """
+    Solucionador baseado na teoria do Problema da Secretária (regra dos 37%):
+    - Constrói uma rota TSP de alta qualidade (Farthest Insertion / Multi-start) iniciando em 1.
+    - Avalia os itens na ordem sequencial da rota (ordem de chegada/descoberta).
+    - Utiliza o custo marginal real de transporte (distância restante até a cidade 1).
+    - Observa os primeiros 37% dos itens para calibrar o limiar de qualidade (benchmark).
+    - A partir dos 37%, seleciona itens que superem esse benchmark enquanto couber na mochila.
+    """
+
+    def __init__(
+        self,
+        refinamento: bool = False,
+        limiar_simetrico: bool = False,
+        modelo: str = "TTP1",
+        nome: Optional[str] = None,
+    ):
+        self.refinamento = refinamento
+        self.limiar_simetrico = limiar_simetrico
+        self.modelo = modelo
+        self._nome = nome or ("heuristic_37_refinada" if refinamento else "heuristic_37")
+
     @property
     def nome(self) -> str:
-        return "heuristic_37"
-    
-    def solve(self, instance: TTPInstance) -> SolucaoTTP:
-        cidades_nao_visitadas = set(instance.grafo.cidades.keys())
-        cidades_nao_visitadas.discard(1)
-        rota = [1]
-        cidade_atual = 1
-        
-        while cidades_nao_visitadas:
-            proxima_cidade = min(cidades_nao_visitadas, key=lambda c: instance.grafo.distancia(cidade_atual, c))
-            rota.append(proxima_cidade)
-            cidades_nao_visitadas.remove(proxima_cidade)
-            cidade_atual = proxima_cidade
-            
-        distancias_acumuladas = {1: 0.0}
-        dist_atual = 0.0
-        for i in range(len(rota) - 1):
-            dist_atual += instance.grafo.distancia(rota[i], rota[i+1])
-            distancias_acumuladas[rota[i+1]] = dist_atual
-            
-        alpha = 0.5
-        def calcular_score(item: Item) -> float:
-            dist_impact = distancias_acumuladas.get(item.cidade_origem, 0.0)
-            return (item.valor / item.peso) - alpha * (dist_impact * item.peso / instance.capacidade_mochila) if item.peso > 0 else float('inf')
+        return self._nome
 
-        itens_ordenados = sorted(instance.itens, key=calcular_score, reverse=True)
-        
-        m = len(itens_ordenados)
+    def solve(self, instance: TTPInstance) -> SolucaoTTP:
+        # 1. Rota TSP de menor distância iniciando na cidade 1
+        rota = obter_melhor_rota_tsp(instance.grafo)
+        n = len(rota)
+
+        # 2. Distâncias restantes de cada cidade até o fechamento do ciclo na cidade 1
+        distancias_restantes = {}
+        dist_acc = instance.grafo.distancia(rota[-1], rota[0])
+        distancias_restantes[rota[-1]] = dist_acc
+
+        for i in range(n - 2, -1, -1):
+            dist_acc += instance.grafo.distancia(rota[i], rota[i + 1])
+            distancias_restantes[rota[i]] = dist_acc
+
+        # 3. Cálculo de velocidade física e impacto marginal no tempo de viagem
+        cap_mochila = max(instance.capacidade_mochila, 1e-6)
+        v_min = instance.v_min
+        v_max = instance.v_max
+        taxa_aluguel = instance.taxa_aluguel
+        const_deg = max(instance.constante_degradacao, 1e-6)
+
+        def velocidade(peso: float) -> float:
+            return max(v_min, v_max - peso * ((v_max - v_min) / cap_mochila))
+
+        def calcular_lucro_marginal(item: Item, peso_mochila: float) -> float:
+            """
+            Calcula o lucro líquido adicional exato ao adicionar este item à mochila
+            já carregando peso_mochila. Suporta tanto TTP1 (aluguel) quanto TTP2 (degradação).
+            """
+            if item.peso <= 0:
+                return item.valor
+            d_restante = distancias_restantes.get(item.cidade_origem, 0.0)
+
+            if self.modelo == "TTP2":
+                v_depois = velocidade(peso_mochila + item.peso)
+                tempo_restante = d_restante / v_depois
+                degradacao = math.ceil(tempo_restante / const_deg)
+                return item.valor - degradacao
+            else:
+                v_antes = velocidade(peso_mochila)
+                v_depois = velocidade(peso_mochila + item.peso)
+                delta_tempo = d_restante * (1.0 / v_depois - 1.0 / v_antes)
+                custo_transporte = taxa_aluguel * delta_tempo
+                return item.valor - custo_transporte
+
+        def calcular_score(item: Item, peso_mochila: float = 0.0) -> float:
+            if item.peso <= 0:
+                return float("inf")
+            lucro = calcular_lucro_marginal(item, peso_mochila)
+            return lucro / item.peso
+
+        # 4. Sequência da secretária:
+        # Itens dispostos na ordem natural em que são visitados ao longo da rota
+        itens_sequenciais: List[Item] = []
+        for cidade_id in rota:
+            cidade = instance.grafo.cidades[cidade_id]
+            itens_sequenciais.extend(cidade.itens)
+
+        m = len(itens_sequenciais)
         limite_calibracao = int(0.37 * m)
-        itens_calibracao = itens_ordenados[:limite_calibracao]
-        itens_coleta = itens_ordenados[limite_calibracao:]
-        
-        melhor_threshold = float('-inf')
-        for item in itens_calibracao:
-            score = calcular_score(item)
-            if score > melhor_threshold:
-                melhor_threshold = score
-                
+        itens_calibracao = itens_sequenciais[:limite_calibracao]
+        itens_coleta = itens_sequenciais[limite_calibracao:]
+
+        # Fase de calibração: observa os scores intrínsecos dos primeiros 37% (avaliados em mochila vazia)
+        scores_calibracao = [calcular_score(item, 0.0) for item in itens_calibracao]
+        melhor_threshold = max(scores_calibracao) if scores_calibracao else 0.0
+        limiar = max(melhor_threshold, 0.0)
+
+        # Fase de decisão/coleta da secretária:
         peso_atual = 0.0
         plano_coleta: Dict[int, List[int]] = {}
-        
+        itens_coletados_ids = set()
+
         for item in itens_coleta:
-            if calcular_score(item) >= melhor_threshold:
-                if peso_atual + item.peso <= instance.capacidade_mochila:
-                    peso_atual += item.peso
-                    if item.cidade_origem not in plano_coleta:
-                        plano_coleta[item.cidade_origem] = []
-                    plano_coleta[item.cidade_origem].append(item.id)
-                    
+            if peso_atual + item.peso <= instance.capacidade_mochila:
+                if self.limiar_simetrico:
+                    # Modo Simétrico: compara score intrínseco (mochila vazia) com o limiar
+                    score_intrinseco = calcular_score(item, 0.0)
+                    lucro_marginal = calcular_lucro_marginal(item, peso_atual)
+                    if score_intrinseco > limiar and lucro_marginal > 0:
+                        peso_atual += item.peso
+                        itens_coletados_ids.add(item.id)
+                        if item.cidade_origem not in plano_coleta:
+                            plano_coleta[item.cidade_origem] = []
+                        plano_coleta[item.cidade_origem].append(item.id)
+                else:
+                    # Modo Padrão: avalia score dinâmico dependente do peso acumulado
+                    score = calcular_score(item, peso_atual)
+                    if score > limiar:
+                        peso_atual += item.peso
+                        itens_coletados_ids.add(item.id)
+                        if item.cidade_origem not in plano_coleta:
+                            plano_coleta[item.cidade_origem] = []
+                        plano_coleta[item.cidade_origem].append(item.id)
+
+        # 5. Preenchimento guloso pós-secretária:
+        itens_candidatos = [it for it in instance.itens if it.id not in itens_coletados_ids]
+
+        while peso_atual < instance.capacidade_mochila:
+            melhor_item = None
+            melhor_densidade = 0.0
+
+            for it in itens_candidatos:
+                if peso_atual + it.peso <= instance.capacidade_mochila:
+                    lucro_adicional = calcular_lucro_marginal(it, peso_atual)
+                    if lucro_adicional > 0:
+                        densidade = lucro_adicional / it.peso if it.peso > 0 else float("inf")
+                        if densidade > melhor_densidade:
+                            melhor_densidade = densidade
+                            melhor_item = it
+
+            if melhor_item is not None:
+                peso_atual += melhor_item.peso
+                itens_coletados_ids.add(melhor_item.id)
+                itens_candidatos.remove(melhor_item)
+                if melhor_item.cidade_origem not in plano_coleta:
+                    plano_coleta[melhor_item.cidade_origem] = []
+                plano_coleta[melhor_item.cidade_origem].append(melhor_item.id)
+            else:
+                break
+
+        if self.refinamento:
+            from src.solvers.pack_iterative import refinar_plano_coleta
+            plano_coleta = refinar_plano_coleta(
+                instance, rota, plano_coleta, modelo=self.modelo
+            )
+
         return SolucaoTTP(rota=rota, plano_coleta=plano_coleta)
+
+
+# Registro de variações para comparação direta
+SolverRegistry.register(
+    type(
+        "Heuristic37RefinadaSolver",
+        (Heuristic37Solver,),
+        {"nome": "heuristic_37_refinada", "__init__": lambda self: Heuristic37Solver.__init__(self, refinamento=True, nome="heuristic_37_refinada")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "Heuristic37SimetricaSolver",
+        (Heuristic37Solver,),
+        {"nome": "heuristic_37_simetrica", "__init__": lambda self: Heuristic37Solver.__init__(self, limiar_simetrico=True, nome="heuristic_37_simetrica")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "Heuristic37TTP2Solver",
+        (Heuristic37Solver,),
+        {"nome": "heuristic_37_ttp2", "__init__": lambda self: Heuristic37Solver.__init__(self, modelo="TTP2", nome="heuristic_37_ttp2")},
+    )
+)

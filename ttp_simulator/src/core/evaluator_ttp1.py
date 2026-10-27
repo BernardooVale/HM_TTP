@@ -53,4 +53,3 @@ def evaluate(instance: TTPInstance, solucao: SolucaoTTP) -> Dict[str, Any]:
     }
 
 avaliar_ttp1 = evaluate
-

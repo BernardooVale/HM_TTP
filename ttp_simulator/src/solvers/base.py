@@ -16,20 +16,40 @@ class BaseSolver(ABC):
         ...
 
 class SolverRegistry:
-    """Factory/Registry para solucionadores."""
+    """Factory/Registry para solucionadores com suporte a resolução multi-processo."""
     _registry: dict[str, type[BaseSolver]] = {}
+    _registry_modules: dict[str, tuple[str, str]] = {}
     
     @classmethod
-    def register(cls, solver_class: type[BaseSolver]) -> type[BaseSolver]:
-        """Decorator to register a solver."""
-        instance = solver_class()
-        cls._registry[instance.nome] = solver_class
-        return solver_class
+    def register(cls, name_or_class=None):
+        """Decorator flexível para registrar um solver (suporta @SolverRegistry.register ou @SolverRegistry.register('nome'))."""
+        if name_or_class is not None and isinstance(name_or_class, type) and issubclass(name_or_class, BaseSolver):
+            solver_class = name_or_class
+            instance = solver_class()
+            cls._registry[instance.nome] = solver_class
+            cls._registry_modules[instance.nome] = (solver_class.__module__, solver_class.__name__)
+            return solver_class
+
+        def decorator(solver_class: type[BaseSolver]) -> type[BaseSolver]:
+            instance = solver_class()
+            nome_chave = name_or_class if isinstance(name_or_class, str) else instance.nome
+            cls._registry[nome_chave] = solver_class
+            cls._registry_modules[nome_chave] = (solver_class.__module__, solver_class.__name__)
+            return solver_class
+
+        return decorator
     
     @classmethod
     def get(cls, nome: str) -> BaseSolver:
         if nome not in cls._registry:
-            raise ValueError(f"Solucionador '{nome}' não encontrado. Disponíveis: {list(cls._registry.keys())}")
+            if nome in cls._registry_modules:
+                mod_name, class_name = cls._registry_modules[nome]
+                import importlib
+                mod = importlib.import_module(mod_name)
+                solver_cls = getattr(mod, class_name)
+                cls._registry[nome] = solver_cls
+            else:
+                raise ValueError(f"Solucionador '{nome}' não encontrado. Disponíveis: {list(cls._registry.keys())}")
         return cls._registry[nome]()
     
     @classmethod

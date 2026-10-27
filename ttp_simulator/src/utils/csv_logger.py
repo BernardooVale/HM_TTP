@@ -22,7 +22,7 @@ class CSVLogger:
         self._inicializar_csv()
     
     def _inicializar_csv(self):
-        if not self.output_path.exists():
+        if not self.output_path.exists() or self.output_path.stat().st_size == 0:
             with open(self.output_path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=self.COLUNAS)
                 writer.writeheader()
@@ -32,6 +32,28 @@ class CSVLogger:
         with open(self.output_path, 'a', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=self.COLUNAS)
             writer.writerow(dados)
+
+    def obter_chaves_registradas(self) -> set[tuple[str, str, str, int]]:
+        """Retorna conjunto de tuplas (arquivo_instancia, modelo_ttp, solucionador, seed) já gravadas."""
+        registradas = set()
+        if not self.output_path.exists():
+            return registradas
+        try:
+            with open(self.output_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    inst = row.get('arquivo_instancia', '')
+                    mod = row.get('modelo_ttp', '')
+                    solv = row.get('solucionador', '')
+                    s_str = row.get('seed', '0')
+                    try:
+                        seed = int(s_str)
+                    except ValueError:
+                        seed = 0
+                    registradas.add((inst, mod, solv, seed))
+        except Exception:
+            pass
+        return registradas
     
     @staticmethod
     def criar_registro(

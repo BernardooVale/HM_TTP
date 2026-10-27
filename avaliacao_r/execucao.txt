@@ -1,0 +1,8 @@
+# Executa toda a bateria de testes de forma segura:
+python -m avaliacao_r.runner
+
+# Ou para rodar apenas uma instância específica para testar:
+python -m avaliacao_r.runner --instancia instancia_01
+
+# Ou ajustando o tempo limite por instância (ex: 60 segundos):
+python -m avaliacao_r.runner --timeout 60.0
