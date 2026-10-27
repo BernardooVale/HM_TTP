@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Set
 from src.core.models import TTPInstance, SolucaoTTP, Item
 from src.core.fast_evaluator import FastTTPEvaluator
 from src.solvers.base import BaseSolver, SolverRegistry
-from src.solvers.heuristic_37 import obter_melhor_rota_tsp
+from src.solvers.tsp import obter_melhor_rota_tsp
 
 
 def refinar_plano_coleta(
