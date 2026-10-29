@@ -2,6 +2,7 @@ import math
 from typing import Dict, List, Optional
 from src.core.models import TTPInstance, SolucaoTTP, Item, Grafo
 from src.solvers.base import BaseSolver, SolverRegistry
+from .config_manager import obter_melhor_configuracao
 
 
 from src.solvers.tsp import (
@@ -24,15 +25,16 @@ class Heuristic37Solver(BaseSolver):
 
     def __init__(
         self,
-        refinamento: bool = False,
-        limiar_simetrico: bool = False,
+        refinamento: Optional[bool] = None,
+        limiar_simetrico: Optional[bool] = None,
         modelo: str = "TTP1",
         nome: Optional[str] = None,
     ):
-        self.refinamento = refinamento
-        self.limiar_simetrico = limiar_simetrico
+        cfg = obter_melhor_configuracao("heuristic_37")
+        self.refinamento = refinamento if refinamento is not None else cfg.get("refinamento", True)
+        self.limiar_simetrico = limiar_simetrico if limiar_simetrico is not None else cfg.get("limiar_simetrico", False)
         self.modelo = modelo
-        self._nome = nome or ("heuristic_37_refinada" if refinamento else "heuristic_37")
+        self._nome = nome or "heuristic_37"
 
     @property
     def nome(self) -> str:
@@ -190,3 +192,10 @@ SolverRegistry.register(
         {"nome": "heuristic_37_ttp2", "__init__": lambda self: Heuristic37Solver.__init__(self, modelo="TTP2", nome="heuristic_37_ttp2")},
     )
 )
+SolverRegistry.register(
+    type(
+        "Heuristic37SemRefinamentoSolver",
+        (Heuristic37Solver,),
+        {"nome": "heuristic_37_sem_refinamento", "__init__": lambda self: Heuristic37Solver.__init__(self, refinamento=False, nome="heuristic_37_sem_refinamento")},
+    )
+)

@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from src.core.models import Item, SolucaoTTP, TTPInstance
 from src.solvers.base import BaseSolver, SolverRegistry
+from .config_manager import obter_melhor_configuracao
 from src.solvers.tsp import (
     otimizar_2opt,
     resolver_caminho_fixo_bb,
@@ -164,21 +165,23 @@ class QueimadaSolver(BaseSolver):
 
     def __init__(
         self,
-        temperatura: str = "total_value",
-        dissipacao: str = "bfs",
-        direcao: str = "calor_final",
-        selecao: str = "greedy_relative",
-        metodo_construcao: str = "kruskal",
-        ordem_selecao: str = "densidade",
-        refinamento: bool = True,
-        refinamento_rota: bool = True,
-        afinidade_termica: bool = True,
-        gamma_afinidade: float = 1.0,
-        adaptar_regime_r: bool = False,
+        temperatura: Optional[str] = None,
+        dissipacao: Optional[str] = None,
+        direcao: Optional[str] = None,
+        selecao: Optional[str] = None,
+        metodo_construcao: Optional[str] = None,
+        ordem_selecao: Optional[str] = None,
+        refinamento: Optional[bool] = None,
+        refinamento_rota: Optional[bool] = None,
+        afinidade_termica: Optional[bool] = None,
+        gamma_afinidade: Optional[float] = None,
+        adaptar_regime_r: Optional[bool] = None,
         modelo: str = "TTP1",
-        otimizar_buracos: bool = False,
+        otimizar_buracos: Optional[bool] = None,
         nome: Optional[str] = None,
     ):
+        # Carrega dinamicamente a melhor configuração conhecida persistida
+        cfg = obter_melhor_configuracao("queimada")
         """
         Parâmetros:
         - temperatura:              'total_value', 'knapsack_exact', 'knapsack_greedy' (padrão ótimo: 'total_value')
@@ -195,19 +198,19 @@ class QueimadaSolver(BaseSolver):
         - modelo:                   'TTP1' (aluguel de viagem) ou 'TTP2' (degradação temporal) (padrão: 'TTP1')
         - otimizar_buracos:         se True, otimiza segmentos vazios sem coleta pós-mochila via B&B / 2-opt (padrão: False)
         """
-        self.temperatura_modo = temperatura
-        self.dissipacao_modo = dissipacao
-        self.direcao_modo = direcao
-        self.selecao_modo = selecao
-        self.metodo_construcao = metodo_construcao
-        self.ordem_selecao = ordem_selecao
-        self.refinamento = refinamento
-        self.refinamento_rota = refinamento_rota
-        self.afinidade_termica = afinidade_termica
-        self.gamma_afinidade = gamma_afinidade
-        self.adaptar_regime_r = adaptar_regime_r
+        self.temperatura_modo = temperatura if temperatura is not None else cfg.get("temperatura", "total_value")
+        self.dissipacao_modo = dissipacao if dissipacao is not None else cfg.get("dissipacao", "dijkstra")
+        self.direcao_modo = direcao if direcao is not None else cfg.get("direcao", "calor_final")
+        self.selecao_modo = selecao if selecao is not None else cfg.get("selecao", "greedy_relative")
+        self.metodo_construcao = metodo_construcao if metodo_construcao is not None else cfg.get("metodo_construcao", "backward_edges")
+        self.ordem_selecao = ordem_selecao if ordem_selecao is not None else cfg.get("ordem_selecao", "densidade")
+        self.refinamento = refinamento if refinamento is not None else cfg.get("refinamento", True)
+        self.refinamento_rota = refinamento_rota if refinamento_rota is not None else cfg.get("refinamento_rota", True)
+        self.afinidade_termica = afinidade_termica if afinidade_termica is not None else cfg.get("afinidade_termica", True)
+        self.gamma_afinidade = gamma_afinidade if gamma_afinidade is not None else cfg.get("gamma_afinidade", 1.0)
+        self.adaptar_regime_r = adaptar_regime_r if adaptar_regime_r is not None else cfg.get("adaptar_regime_r", False)
+        self.otimizar_buracos = otimizar_buracos if otimizar_buracos is not None else cfg.get("otimizar_buracos", True)
         self.modelo = modelo
-        self.otimizar_buracos = otimizar_buracos
         self._nome = nome or "queimada"
 
     @property
@@ -812,3 +815,20 @@ SolverRegistry.register(
         },
     )
 )
+
+SolverRegistry.register(
+    type(
+        "QueimadaKruskalPadraoSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_kruskal_padrao",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                metodo_construcao="kruskal",
+                dissipacao="bfs",
+                otimizar_buracos=False,
+                nome="queimada_kruskal_padrao",
+            ),
+        },
+    )
+)

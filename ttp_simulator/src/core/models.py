@@ -3,8 +3,6 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 import numpy as np
-from pydantic import Field
-from pydantic.dataclasses import dataclass
 
 
 @dataclass
@@ -190,9 +188,9 @@ class Tour:
     """É a ordem dos nós no tour."""
     cost: float
     """Custo do tour."""
-    length: int = Field(init=False)
+    length: int = field(init=False)
     """Comprimento do tour."""
-    length_minus_1: int = Field(init=False)
+    length_minus_1: int = field(init=False)
     """Comprimento do tour menos 1, usado para implementações rápidas de módulo."""
 
     def __post_init__(self):

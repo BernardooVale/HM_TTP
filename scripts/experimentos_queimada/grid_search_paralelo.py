@@ -496,6 +496,26 @@ def executar_grid_search(
             f"{afin_str:<5} | {c['direcao']:<11} | {c['selecao']:<15} | {c['ordem_selecao']:<10} | {ref_str:<5} | {med_g:>14.2f}"
         )
 
+    # Auto-atualização dinâmica da configuração campeã no config_manager
+    if ranking:
+        try:
+            from src.solvers.config_manager import atualizar_campeao_se_melhor
+            melhor_g, _, _, melhor_c_id = ranking[0]
+            melhor_cfg = configuracoes[melhor_c_id]
+            atualizou = atualizar_campeao_se_melhor(
+                "queimada",
+                melhor_cfg,
+                melhor_g,
+                origem=f"grid_search_paralelo_{espaco}",
+                detalhes={"total_instancias": len(instancias), "instancias": [f.name for f in instancias]},
+            )
+            if atualizou:
+                print(f"\n🏆 AUTO-UPDATE: Nova melhor configuração da Queimada salva automaticamente (Score: {melhor_g:.2f})!")
+            else:
+                print(f"\nℹ️ AUTO-UPDATE: Configuração campeã atual mantida no registro persistido.")
+        except Exception as e:
+            print(f"\n⚠️ Falha ao atualizar configuração campeã: {e}")
+
     # Análise de Impacto Marginal por Parâmetro
     print(f"\n{'='*115}")
     print(f"{'ANÁLISE DE IMPACTO MARGINAL POR PARÂMETRO (LUCRO MÉDIO G)':^115}")

@@ -1,0 +1,30 @@
+{
+  "queimada": {
+    "parametros": {
+      "temperatura": "total_value",
+      "dissipacao": "dijkstra",
+      "direcao": "calor_final",
+      "metodo_construcao": "backward_edges",
+      "afinidade_termica": true,
+      "refinamento_rota": true,
+      "otimizar_buracos": true,
+      "selecao": "greedy_relative",
+      "ordem_selecao": "densidade",
+      "refinamento": true,
+      "gamma_afinidade": 1.0,
+      "adaptar_regime_r": false
+    },
+    "score_medio": 768.29,
+    "origem": "grid_search_paralelo_completo",
+    "data_atualizacao": "2026-10-29 09:30:00"
+  },
+  "heuristic_37": {
+    "parametros": {
+      "refinamento": true,
+      "limiar_simetrico": false
+    },
+    "score_medio": 634.42,
+    "origem": "benchmark_refinado",
+    "data_atualizacao": "2026-10-29 09:30:00"
+  }
+}

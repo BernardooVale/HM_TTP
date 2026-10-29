@@ -107,12 +107,18 @@ def executar_orquestrador(
             # Baselines
             "random",
             "greedy",
-            # Heurística dos 37%
+            # Heurística dos 37% (Padrão Oficial Campeão + Variações)
             "heuristic_37",
+            "heuristic_37_sem_refinamento",
             "heuristic_37_refinada",
             "heuristic_37_simetrica",
-            # Queimada - Variações
+            # Queimada (Padrão Oficial Campeão + Variações de Ablação)
             "queimada",
+            "queimada_kruskal_padrao",
+            "queimada_backward_buracos",
+            "queimada_backward_arestas",
+            "queimada_backward_sem_2opt_buracos",
+            "queimada_com_buracos",
             "queimada_sem_2opt",
             "queimada_com_2opt",
             "queimada_sem_afinidade",
