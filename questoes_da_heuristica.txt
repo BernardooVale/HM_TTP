@@ -1,2 +1,5 @@
 - Onde que fala que a cidade incial tem que ser a cidade 1?
 - Se não falar nada, a cidade incial/final deve ser aquela que menos contribuí para suas arestas adjacentes (queimada)
+
+- Também pode ser feito um grafo direcionado. Dessa forma elimina a redundância (cidade 1 manda temperatura para cidade 2; cidade 2 manda temperatura para cidade 1; entre elas a recebida pela própria 1)
+  E a decisão da cidade 1 passa a ser maior diferença entre vértice e cidade destino, cidade destino vira cidade inicial e cidade origem a última; de resto fia igual.
