@@ -67,6 +67,8 @@ def main():
         workers=args.workers,
         resume=not args.no_history,
         history_csv=caminho_hist,
+        cenario=args.cenario,
+        propagar_resultados=True,
     )
 
     if args.check_history:

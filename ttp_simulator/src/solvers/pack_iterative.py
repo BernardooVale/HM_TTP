@@ -9,10 +9,16 @@ IEEE Congress on Evolutionary Computation (CEC 2015).
 """
 
 from typing import Dict, List, Optional, Set
+import numpy as np
 from src.core.models import TTPInstance, SolucaoTTP, Item
 from src.core.fast_evaluator import FastTTPEvaluator
 from src.solvers.base import BaseSolver, SolverRegistry
 from src.solvers.tsp import obter_melhor_rota_tsp
+from src.solvers.numba_kernels import (
+    NUMBA_AVAILABLE,
+    numba_refinar_ttp1,
+    numba_refinar_ttp2,
+)
 
 
 def refinar_plano_coleta(
@@ -30,6 +36,80 @@ def refinar_plano_coleta(
     2. Fase ADD: Insere itens que caibam na capacidade restante e tragam ganho líquido estritamente positivo.
     3. Itera até convergência ou atingir max_iter. Suporta TTP1 e TTP2.
     """
+    if not instance.itens or not rota:
+        return {}
+
+    if NUMBA_AVAILABLE:
+        n_cidades = len(rota)
+        cidade_idx = {rota[i]: i for i in range(n_cidades)}
+
+        if getattr(instance.grafo, "_distance_matrix", None) is not None:
+            D = instance.grafo._distance_matrix
+            distancias = np.array(
+                [D[rota[i], rota[(i + 1) % n_cidades]] for i in range(n_cidades)],
+                dtype=np.float64,
+            )
+        else:
+            distancias = np.array(
+                [instance.grafo.distancia(rota[i], rota[(i + 1) % n_cidades]) for i in range(n_cidades)],
+                dtype=np.float64,
+            )
+
+        itens_coletados_set: Set[int] = set()
+        for it_ids in plano_coleta.values():
+            for i_id in it_ids:
+                itens_coletados_set.add(i_id)
+
+        n_itens = len(instance.itens)
+        item_cidx = np.empty(n_itens, dtype=np.int32)
+        item_peso = np.empty(n_itens, dtype=np.float64)
+        item_valor = np.empty(n_itens, dtype=np.float64)
+        coletado = np.zeros(n_itens, dtype=np.uint8)
+
+        for k, it in enumerate(instance.itens):
+            item_cidx[k] = cidade_idx.get(it.cidade_origem, -1)
+            item_peso[k] = it.peso
+            item_valor[k] = it.valor
+            if it.id in itens_coletados_set and item_cidx[k] >= 0:
+                coletado[k] = 1
+
+        if modelo == "TTP2":
+            coletado = numba_refinar_ttp2(
+                distancias,
+                item_cidx,
+                item_peso,
+                item_valor,
+                coletado,
+                float(instance.capacidade_mochila),
+                float(instance.v_min),
+                float(instance.v_max),
+                float(instance.constante_degradacao),
+                int(max_iter),
+            )
+        else:
+            coletado = numba_refinar_ttp1(
+                distancias,
+                item_cidx,
+                item_peso,
+                item_valor,
+                coletado,
+                float(instance.capacidade_mochila),
+                float(instance.v_min),
+                float(instance.v_max),
+                float(instance.taxa_aluguel),
+                int(max_iter),
+            )
+
+        novo_plano: Dict[int, List[int]] = {}
+        for k in range(n_itens):
+            if coletado[k]:
+                it = instance.itens[k]
+                origem = it.cidade_origem
+                if origem not in novo_plano:
+                    novo_plano[origem] = []
+                novo_plano[origem].append(it.id)
+        return novo_plano
+
     evaluator = FastTTPEvaluator(instance, rota, modelo=modelo)
     itens_by_id = {it.id: it for it in instance.itens}
 
@@ -185,4 +265,3 @@ class PackIterativeSolver(BaseSolver):
         rota = obter_melhor_rota_tsp(instance.grafo)
         plano_coleta = resolver_pack_iterative(instance, rota, modelo=self.modelo)
         return SolucaoTTP(rota=rota, plano_coleta=plano_coleta)
-

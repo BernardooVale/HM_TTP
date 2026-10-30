@@ -1,5 +1,19 @@
 from typing import List
+import numpy as np
 from src.core.models import Grafo
+from src.solvers.numba_kernels import (
+    NUMBA_AVAILABLE,
+    numba_otimizar_2opt,
+    numba_caminho_fixo_bb,
+    numba_caminho_fixo_2opt,
+)
+
+
+def _pode_usar_matriz_densa(grafo: Grafo) -> bool:
+    if not NUMBA_AVAILABLE or not grafo.cidades:
+        return False
+    max_id = max(grafo.cidades.keys())
+    return max_id == len(grafo.cidades) and 1 in grafo.cidades
 
 
 def otimizar_2opt(rota: List[int], grafo: Grafo) -> List[int]:
@@ -10,6 +24,12 @@ def otimizar_2opt(rota: List[int], grafo: Grafo) -> List[int]:
     n = len(rota)
     if n <= 3:
         return list(rota)
+
+    if _pode_usar_matriz_densa(grafo):
+        D = grafo.distance_matrix
+        rota_arr = np.asarray(rota, dtype=np.int32)
+        res_arr = numba_otimizar_2opt(rota_arr, D)
+        return res_arr.tolist()
 
     melhor_rota = list(rota)
     melhorou = True
@@ -38,6 +58,12 @@ def resolver_caminho_fixo_bb(A: int, B: int, cidades: List[int], grafo: Grafo) -
     n = len(cidades)
     if n <= 1:
         return list(cidades)
+
+    if _pode_usar_matriz_densa(grafo):
+        D = grafo.distance_matrix
+        cid_arr = np.asarray(cidades, dtype=np.int32)
+        res_arr = numba_caminho_fixo_bb(int(A), int(B), cid_arr, D)
+        return res_arr.tolist()
 
     d_orig = (
         grafo.distancia(A, cidades[0])
@@ -96,6 +122,12 @@ def resolver_caminho_fixo_2opt(A: int, B: int, cidades: List[int], grafo: Grafo)
     m = len(cidades)
     if m <= 1:
         return list(cidades)
+
+    if _pode_usar_matriz_densa(grafo):
+        D = grafo.distance_matrix
+        cid_arr = np.asarray(cidades, dtype=np.int32)
+        res_arr = numba_caminho_fixo_2opt(int(A), int(B), cid_arr, D)
+        return res_arr.tolist()
 
     melhor = list(cidades)
     melhorou = True

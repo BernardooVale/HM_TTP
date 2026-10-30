@@ -367,6 +367,8 @@ def executar_bateria_lucrativa(
         workers=num_workers,
         resume=(not forcar),
         output_stats_csv=csv_estatisticas,
+        cenario="lucrativas",
+        propagar_resultados=True,
     )
 
     # Substitui a listagem de arquivos do runner pelos arquivos filtrados ordenados por tamanho

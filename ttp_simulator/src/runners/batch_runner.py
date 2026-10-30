@@ -14,6 +14,11 @@ from src.core.evaluator_ttp2 import avaliar_ttp2
 from src.scenarios.parser import InstanceParser
 from src.solvers.base import SolverRegistry
 from src.utils.csv_logger import CSVLogger
+from src.utils.results_manager import (
+    obter_instancias_equilibradas,
+    obter_instancias_lucrativas,
+    propagar_registro_3x3,
+)
 
 
 def _executar_tarefa_worker(args: Tuple[str, str, Optional[Tuple[str, str]], str, int, int]) -> Optional[Dict]:
@@ -165,8 +170,20 @@ class BatchRunner:
         output_stats_csv: Optional[str] = None,
         history_csv: Optional[str] = None,
         importar_historico: bool = True,
+        cenario: Optional[str] = None,
+        propagar_resultados: bool = True,
     ):
         self.test_dir = Path(test_dir)
+        self.cenario = cenario
+        if not self.cenario:
+            out_name = Path(output_csv).name.lower()
+            if "lucrativas" in out_name:
+                self.cenario = "lucrativas"
+            elif "equilibradas" in out_name:
+                self.cenario = "equilibradas"
+            else:
+                self.cenario = "completo"
+        self.propagar_resultados = propagar_resultados
         self.solvers = solvers
         self.models = models or ["TTP1"]
         self.runs = runs
@@ -187,16 +204,22 @@ class BatchRunner:
         que as instâncias menores sejam executadas primeiro.
         """
         extensoes = ["*.txt", "*.ttp"]
+        cen = (self.cenario or "completo").strip().lower()
+        pastas_busca = [self.test_dir]
+        if cen == "completo" and (self.test_dir / "alto_prejuizo").is_dir():
+            pastas_busca.append(self.test_dir / "alto_prejuizo")
+
         arquivos = []
-        for ext in extensoes:
-            for arq in self.test_dir.glob(ext):
-                if not arq.is_file():
-                    continue
-                if "quarentena" in arq.parts:
-                    continue
-                if "alto_prejuizo" in arq.parts and self.test_dir.name != "alto_prejuizo":
-                    continue
-                arquivos.append(arq)
+        for pasta in pastas_busca:
+            for ext in extensoes:
+                for arq in pasta.glob(ext):
+                    if not arq.is_file():
+                        continue
+                    if "quarentena" in arq.parts:
+                        continue
+                    if "alto_prejuizo" in arq.parts and cen != "completo" and self.test_dir.name != "alto_prejuizo":
+                        continue
+                    arquivos.append(arq)
 
         # Remove duplicados preservando ordem estável
         vistos = set()
@@ -205,6 +228,14 @@ class BatchRunner:
             if arq.name not in vistos:
                 vistos.add(arq.name)
                 arquivos_unicos.append(arq)
+
+        # Filtra pelo cenário solicitado
+        if cen == "lucrativas":
+            inst_luc = obter_instancias_lucrativas()
+            arquivos_unicos = [a for a in arquivos_unicos if a.name in inst_luc]
+        elif cen == "equilibradas":
+            inst_eq = obter_instancias_equilibradas()
+            arquivos_unicos = [a for a in arquivos_unicos if a.name in inst_eq]
 
         # Ordena por tamanho: dimensão (cidades), quantidade de itens, tamanho do arquivo e nome
         arquivos_unicos.sort(key=lambda a: (_obter_metadados_tamanho(a), a.name))
@@ -344,6 +375,8 @@ class BatchRunner:
                         registro = _executar_tarefa_worker(t)
                         if registro:
                             self.logger.registrar(registro)
+                            if self.propagar_resultados:
+                                propagar_registro_3x3(registro, ignorar_caminhos={Path(self.output_csv).resolve()})
                             lucro = registro["lucro_liquido_G"]
                             tempo_s = registro["tempo_computacional_seg"]
                             print(
@@ -366,6 +399,8 @@ class BatchRunner:
                                 registro = futuro.result()
                                 if registro:
                                     self.logger.registrar(registro)
+                                    if self.propagar_resultados:
+                                        propagar_registro_3x3(registro, ignorar_caminhos={Path(self.output_csv).resolve()})
                                     lucro = registro["lucro_liquido_G"]
                                     tempo_s = registro["tempo_computacional_seg"]
                                     pct = (completas / total_tarefas) * 100.0

@@ -83,6 +83,7 @@ def executar_orquestrador(
     output_stats: Optional[str] = None,
     diretorio_bateria: Optional[str] = None,
     incluir_alto_prejuizo: bool = False,
+    cenario: str = "completo",
 ):
     gerenciador = GerenciadorInterrupcaoGlobal()
     num_workers = workers if workers is not None else min(os.cpu_count() or 4, 8)
@@ -96,7 +97,7 @@ def executar_orquestrador(
     pasta_resultados = _raiz / "results"
     pasta_resultados.mkdir(parents=True, exist_ok=True)
 
-    csv_detalhado = output_solucoes or str(pasta_resultados / "todos" / "completo.csv")
+    csv_detalhado = output_solucoes or str(pasta_resultados / "todos" / f"{cenario}.csv")
     csv_estatisticas = output_stats or str(None)
 
     modelos = modelos_lista or ["TTP1"]
@@ -170,6 +171,8 @@ def executar_orquestrador(
             workers=num_workers,
             resume=(not forcar),
             output_stats_csv=csv_estatisticas,
+            cenario=cenario,
+            propagar_resultados=True,
         )
 
         if instancias_padrao:
@@ -249,6 +252,12 @@ def main():
         help="Filtro glob para instâncias (ex: '*.txt', '*.ttp', 'instancia_01*')",
     )
     parser.add_argument(
+        "--cenario",
+        choices=["completo", "equilibradas", "lucrativas"],
+        default="completo",
+        help="Cenário de instâncias da matriz 3x3: 'completo', 'equilibradas' ou 'lucrativas' (padrão: completo)",
+    )
+    parser.add_argument(
         "--solvers",
         type=str,
         default=None,
@@ -318,6 +327,7 @@ def main():
         output_stats=args.output_stats,
         diretorio_bateria=args.diretorio_bateria,
         incluir_alto_prejuizo=args.incluir_alto_prejuizo,
+        cenario=args.cenario,
     )
 
 

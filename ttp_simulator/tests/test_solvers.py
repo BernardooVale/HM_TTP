@@ -165,3 +165,44 @@ def test_queimada_directed_variations(sample_instance):
             for it_id in it_ids
         )
         assert peso_total <= sample_instance.capacidade_mochila
+
+
+def test_adaptive_ram_cache_and_numba_equivalence(sample_instance):
+    from src.solvers.numba_kernels import (
+        AdaptiveRAMCache,
+        detectar_memoria_sistema_bytes,
+        obter_cache_ram_global,
+    )
+    from src.solvers.queimada import QueimadaSolver
+
+    total_b, avail_b = detectar_memoria_sistema_bytes()
+    assert total_b > 0
+    assert avail_b > 0
+
+    # Testa cache com limite estrito de memória e eviction LRU automático
+    cache = AdaptiveRAMCache(num_workers=4, min_budget_mb=0.002, max_budget_mb=0.005)
+    for i in range(100):
+        cache.set(f"chave_{i}", [i] * 20)
+    resumo = cache.status_resumo()
+    assert resumo["evictions"] > 0
+    assert cache._current_bytes <= cache.budget_bytes
+
+    # Verifica hit no cache global durante execuções sucessivas da Queimada
+    global_cache = obter_cache_ram_global()
+    global_cache.clear()
+    hits_antes = global_cache.hits
+
+    solver = QueimadaSolver(
+        temperatura="knapsack_exact",
+        dissipacao="dijkstra",
+        metodo_construcao="kruskal",
+        refinamento=True,
+        refinamento_rota=True,
+        otimizar_buracos=True,
+    )
+    sol1 = solver.solve(sample_instance)
+    sol2 = solver.solve(sample_instance)
+
+    assert sol1.rota == sol2.rota
+    assert sol1.plano_coleta == sol2.plano_coleta
+    assert global_cache.hits > hits_antes

@@ -1,7 +1,9 @@
 import heapq
 import math
 from collections import deque
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
+import numpy as np
 
 from src.core.models import Item, SolucaoTTP, TTPInstance
 from src.solvers.base import BaseSolver, SolverRegistry
@@ -11,6 +13,34 @@ from src.solvers.tsp import (
     resolver_caminho_fixo_bb,
     resolver_caminho_fixo_2opt,
 )
+from src.solvers.numba_kernels import (
+    NUMBA_AVAILABLE,
+    obter_cache_ram_global,
+    numba_knapsack_01_bb,
+    numba_calcular_menores_caminhos,
+    numba_dissipar_calor_matriz,
+    numba_construir_rota_gulosa,
+    numba_construir_rota_kruskal,
+)
+
+
+def _chave_instancia(instance: TTPInstance) -> Tuple[str, int, int, float, float]:
+    """Gera chave imutável leve que identifica univocamente uma instância e seus parâmetros no cache DP."""
+    return (
+        instance.nome or "",
+        len(instance.grafo.cidades),
+        len(instance.itens),
+        float(instance.capacidade_mochila),
+        float(instance.taxa_aluguel),
+    )
+
+
+def _grafo_eh_denso(instance: TTPInstance) -> bool:
+    if not instance.grafo.cidades:
+        return False
+    max_id = max(instance.grafo.cidades.keys())
+    return max_id == len(instance.grafo.cidades) and 1 in instance.grafo.cidades
+
 
 def resolver_knapsack_01_exato(itens: List[Item], capacidade: float) -> Tuple[float, List[Item]]:
     """
@@ -31,6 +61,13 @@ def resolver_knapsack_01_exato(itens: List[Item], capacidade: float) -> Tuple[fl
         reverse=True,
     )
     n = len(itens_ordenados)
+
+    if NUMBA_AVAILABLE:
+        pesos = np.array([it.peso for it in itens_ordenados], dtype=np.float64)
+        valores = np.array([it.valor for it in itens_ordenados], dtype=np.float64)
+        best_val, best_sel = numba_knapsack_01_bb(pesos, valores, float(capacidade))
+        selecionados_res = [itens_ordenados[i] for i in range(n) if best_sel[i]]
+        return float(best_val), selecionados_res
 
     melhor_valor = [0.0]
     melhor_selecao = [[]]
@@ -74,6 +111,7 @@ def resolver_knapsack_01_exato(itens: List[Item], capacidade: float) -> Tuple[fl
     branch_and_bound(0, 0.0, 0.0, [])
     return melhor_valor[0], melhor_selecao[0]
 
+
 def resolver_knapsack_guloso(itens: List[Item], capacidade: float) -> Tuple[float, List[Item]]:
     """
     Resolve a mochila de forma gulosa (ordenada por valor/peso).
@@ -113,6 +151,13 @@ def otimizar_trechos_vazios(
     if n <= 3:
         return list(rota)
 
+    cache = obter_cache_ram_global()
+    cidades_coleta_key = tuple(sorted(cidades_com_coleta))
+    cache_key = ("stage5_buracos", _chave_instancia(instance), tuple(rota), cidades_coleta_key, max_bb_size)
+    cached_rota = cache.get(cache_key)
+    if cached_rota is not None:
+        return list(cached_rota)
+
     ancoras = [0]
     for i in range(1, n):
         if rota[i] in cidades_com_coleta:
@@ -146,6 +191,7 @@ def otimizar_trechos_vazios(
                     ordem = resolver_caminho_fixo_2opt(A, B, cidades_trecho, instance.grafo)
                 nova_rota[idx_A + 1 : idx_B] = ordem
 
+    cache.set(cache_key, tuple(nova_rota))
     return nova_rota
 
 
@@ -227,7 +273,16 @@ class QueimadaSolver(BaseSolver):
         return self._nome
 
     def _calcular_temperaturas(self, instance: TTPInstance) -> Dict[int, float]:
-        """Calcula a temperatura inicial de cada vértice."""
+        """Calcula a temperatura inicial de cada vértice com memoização adaptativa."""
+        if self.temperatura_modo not in ("total_value", "knapsack_exact", "knapsack_greedy"):
+            raise ValueError(f"Modo de temperatura inválido: {self.temperatura_modo}")
+
+        cache = obter_cache_ram_global()
+        cache_key = ("stage1_temp", _chave_instancia(instance), self.temperatura_modo)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return dict(cached)
+
         temperaturas: Dict[int, float] = {}
 
         for cid, cidade in instance.grafo.cidades.items():
@@ -244,10 +299,53 @@ class QueimadaSolver(BaseSolver):
             elif self.temperatura_modo == "knapsack_greedy":
                 val, _ = resolver_knapsack_guloso(cidade.itens, instance.capacidade_mochila)
                 temperaturas[cid] = val
-            else:
-                raise ValueError(f"Modo de temperatura inválido: {self.temperatura_modo}")
 
+        cache.set(cache_key, dict(temperaturas))
         return temperaturas
+
+    def _dissipar_calor_matriz_interna(
+        self, instance: TTPInstance, temperaturas: Dict[int, float]
+    ) -> np.ndarray:
+        """
+        Versão matricial compilada com Numba e memoizada no cache adaptativo de RAM.
+        Retorna matriz 2D (dim x dim) onde calor[u, v] corresponde a (u, v).
+        """
+        if self.dissipacao_modo not in ("adjacent_only", "bfs", "dijkstra"):
+            raise ValueError(f"Modo de dissipação inválido: {self.dissipacao_modo}")
+
+        cache = obter_cache_ram_global()
+        inst_key = _chave_instancia(instance)
+        temp_sig = tuple( round(temperaturas.get(c, 0.0), 6) for c in range(1, len(instance.grafo.cidades) + 1) )
+        cache_key = ("stage2_calor_mat", inst_key, temp_sig, self.dissipacao_modo, self.grafo_direcionado)
+        cached_mat = cache.get(cache_key)
+        if cached_mat is not None:
+            return cached_mat
+
+        D = instance.grafo.distance_matrix
+        dim = D.shape[0]
+        temp_arr = np.zeros(dim, dtype=np.float64)
+        for cid, val in temperaturas.items():
+            if 0 <= cid < dim:
+                temp_arr[cid] = float(val)
+
+        modo_map = {"adjacent_only": 0, "bfs": 1, "dijkstra": 2}
+        modo_id = modo_map[self.dissipacao_modo]
+
+        if modo_id == 2:
+            sp_key = ("stage2_sp_mat", inst_key)
+            SP = cache.get(sp_key)
+            if SP is None:
+                is_metric = instance.grafo.edge_weight_type in ("EUC_2D", "CEIL_2D")
+                SP = numba_calcular_menores_caminhos(D, is_metric)
+                cache.set(sp_key, SP)
+        else:
+            SP = D
+
+        calor_mat = numba_dissipar_calor_matriz(
+            D, SP, temp_arr, modo_id, bool(self.grafo_direcionado)
+        )
+        cache.set(cache_key, calor_mat)
+        return calor_mat
 
     def _dissipar_calor(
         self, instance: TTPInstance, temperaturas: Dict[int, float]
@@ -257,10 +355,28 @@ class QueimadaSolver(BaseSolver):
         - Não-direcionado: retorna (min(u, v), max(u, v)) -> calor acumulado na aresta.
         - Direcionado: retorna (u, v) -> calor transmitido no arco direcionado u -> v.
         """
+        if self.dissipacao_modo not in ("adjacent_only", "bfs", "dijkstra"):
+            raise ValueError(f"Modo de dissipação inválido: {self.dissipacao_modo}")
+
         cidades = list(instance.grafo.cidades.keys())
         n = len(cidades)
 
-        calor: Dict[Tuple[int, int], float] = {}
+        if NUMBA_AVAILABLE and _grafo_eh_denso(instance):
+            calor_mat = self._dissipar_calor_matriz_interna(instance, temperaturas)
+            calor: Dict[Tuple[int, int], float] = {}
+            dim = calor_mat.shape[0]
+            if not self.grafo_direcionado:
+                for u in range(1, dim):
+                    for v in range(u + 1, dim):
+                        calor[(u, v)] = float(calor_mat[u, v])
+            else:
+                for u in range(1, dim):
+                    for v in range(1, dim):
+                        if u != v:
+                            calor[(u, v)] = float(calor_mat[u, v])
+            return calor
+
+        calor = {}
 
         if not self.grafo_direcionado:
             # Modo não-direcionado clássico (min(u, v), max(u, v))
@@ -322,8 +438,6 @@ class QueimadaSolver(BaseSolver):
                             e = (u, v) if u < v else (v, u)
                             d_edge = min(dist[u], dist[v]) + instance.grafo.distancia(u, v) / 2.0
                             calor[e] = calor.get(e, 0.0) + t_s / (1.0 + d_edge)
-            else:
-                raise ValueError(f"Modo de dissipação inválido: {self.dissipacao_modo}")
 
         else:
             # Modo direcionado: arcos ordenados (origem, destino) com u != v
@@ -348,7 +462,6 @@ class QueimadaSolver(BaseSolver):
                         if u == v:
                             continue
                         t_v = temperaturas.get(v, 0.0)
-                        # Calor de u somado ao calor das outras fontes s, excluindo expressamente o destino v
                         outras_fontes = max(T_total - t_u - t_v, 0.0)
                         distancia = instance.grafo.distancia(u, v)
                         calor[(u, v)] = (t_u + outras_fontes / n_outros) / (2.0 * (1.0 + distancia))
@@ -377,19 +490,16 @@ class QueimadaSolver(BaseSolver):
                     for u in cidades:
                         for v in cidades:
                             if u == v or s == v:
-                                # Exclui o próprio destino v como fonte de calor para o arco u -> v
                                 continue
                             d_edge = dist[u] + instance.grafo.distancia(u, v) / 2.0
                             calor[(u, v)] = calor.get((u, v), 0.0) + t_s / (1.0 + d_edge)
-            else:
-                raise ValueError(f"Modo de dissipação inválido: {self.dissipacao_modo}")
 
         return calor
 
     def _construir_rota(
         self,
         instance: TTPInstance,
-        calor: Dict[Tuple[int, int], float],
+        calor: Union[Dict[Tuple[int, int], float], np.ndarray],
         temperaturas: Dict[int, float],
     ) -> List[int]:
         """Constrói a rota iniciando na cidade 1 a partir do calor das arestas/arcos."""
@@ -398,8 +508,95 @@ class QueimadaSolver(BaseSolver):
         if n <= 2:
             return cidades
 
+        if self.direcao_modo not in ("calor_final", "calor_inicio"):
+            raise ValueError(f"Direção inválida: {self.direcao_modo}")
+        if self.metodo_construcao not in ("walk", "kruskal", "backward_edges", "backward_directed", "forward_directed"):
+            raise ValueError(f"Método de construção inválido: {self.metodo_construcao}")
+
+        gamma = self.gamma_afinidade
+        if self.adaptar_regime_r and self.modelo == "TTP1":
+            gamma = min(2.5, max(0.5, 0.5 + instance.taxa_aluguel / 2.0))
+
+        # Caminho acelerado via matriz 2D + Numba JIT + Memoização de Rota Base (pré-orientação)
+        if isinstance(calor, np.ndarray) and NUMBA_AVAILABLE and _grafo_eh_denso(instance):
+            D = instance.grafo.distance_matrix
+            cache = obter_cache_ram_global()
+            inst_key = _chave_instancia(instance)
+            temp_sig = tuple(round(temperaturas.get(c, 0.0), 6) for c in range(1, n + 1))
+
+            # Para métodos que não dependem de direcao_modo antes da orientação final,
+            # compartilhamos a rota pós-2opt entre calor_final e calor_inicio!
+            dir_dep = self.direcao_modo if self.metodo_construcao == "walk" else "ambas"
+            base_key = (
+                "stage3_rota_base",
+                inst_key,
+                temp_sig,
+                self.dissipacao_modo,
+                self.grafo_direcionado,
+                self.metodo_construcao,
+                self.afinidade_termica,
+                round(gamma, 4),
+                self.refinamento_rota,
+                dir_dep,
+            )
+            rota_base = cache.get(base_key)
+            if rota_base is None:
+                if self.metodo_construcao == "kruskal":
+                    rota_arr = numba_construir_rota_kruskal(
+                        D, calor, bool(self.afinidade_termica), float(gamma)
+                    )
+                else:
+                    metodo_map = {
+                        "walk": 0,
+                        "backward_edges": 2,
+                        "backward_directed": 3,
+                        "forward_directed": 4,
+                    }
+                    rota_arr = numba_construir_rota_gulosa(
+                        D,
+                        calor,
+                        metodo_map[self.metodo_construcao],
+                        self.direcao_modo == "calor_final",
+                        bool(self.afinidade_termica),
+                        float(gamma),
+                    )
+                rota_list = rota_arr.tolist()
+                if self.refinamento_rota and n > 3:
+                    rota_list = otimizar_2opt(rota_list, instance.grafo)
+                rota_base = tuple(rota_list)
+                cache.set(base_key, rota_base)
+
+            rota = list(rota_base)
+            rota_rev = [1] + list(reversed(rota[1:]))
+
+            if self.metodo_construcao in ("backward_edges", "backward_directed", "forward_directed"):
+                score_rota = sum(float(calor[rota[i], rota[(i + 1) % n]]) * i for i in range(n))
+                score_rev = sum(float(calor[rota_rev[i], rota_rev[(i + 1) % n]]) * i for i in range(n))
+            else:
+                score_rota = sum(i * temperaturas.get(rota[i], 0.0) for i in range(n))
+                score_rev = sum(i * temperaturas.get(rota_rev[i], 0.0) for i in range(n))
+
+            if self.direcao_modo == "calor_final":
+                return rota if score_rota >= score_rev else rota_rev
+            else:
+                return rota if score_rota <= score_rev else rota_rev
+
+        # Caminho compatível com dict `calor` (quando chamado diretamente por testes unitários com dict)
+        if isinstance(calor, np.ndarray):
+            calor_dict: Dict[Tuple[int, int], float] = {}
+            dim = calor.shape[0]
+            if not self.grafo_direcionado:
+                for u in range(1, dim):
+                    for v in range(u + 1, dim):
+                        calor_dict[(u, v)] = float(calor[u, v])
+            else:
+                for u in range(1, dim):
+                    for v in range(1, dim):
+                        if u != v:
+                            calor_dict[(u, v)] = float(calor[u, v])
+            calor = calor_dict
+
         if self.metodo_construcao == "walk":
-            # Caminhada sequencial partindo da cidade 1
             nao_visitadas = set(cidades)
             nao_visitadas.remove(1)
             rota = [1]
@@ -407,19 +604,15 @@ class QueimadaSolver(BaseSolver):
 
             while nao_visitadas:
                 if self.direcao_modo == "calor_inicio":
-                    # No início busca arestas de maior calor
                     prox = max(
                         nao_visitadas,
                         key=lambda c: calor.get((min(atual, c), max(atual, c)), 0.0),
                     )
-                elif self.direcao_modo == "calor_final":
-                    # Prioriza deixar cidades com maior calor para o final
+                else:
                     prox = min(
                         nao_visitadas,
                         key=lambda c: calor.get((min(atual, c), max(atual, c)), 0.0),
                     )
-                else:
-                    raise ValueError(f"Direção inválida: {self.direcao_modo}")
 
                 rota.append(prox)
                 nao_visitadas.remove(prox)
@@ -428,20 +621,13 @@ class QueimadaSolver(BaseSolver):
             return rota
 
         elif self.metodo_construcao == "kruskal":
-            # Ordenação de arestas: puramente por calor ou por afinidade térmica
             if self.afinidade_termica:
-                gamma = self.gamma_afinidade
-                if self.adaptar_regime_r and self.modelo == "TTP1":
-                    # Modula gamma em função de R da instância:
-                    gamma = min(2.5, max(0.5, 0.5 + instance.taxa_aluguel / 2.0))
-
                 def score_aresta(e: Tuple[int, int]) -> float:
                     d = max(instance.grafo.distancia(e[0], e[1]), 0.001)
                     return calor[e] / (d ** gamma)
 
                 arestas_ordenadas = sorted(calor.keys(), key=score_aresta, reverse=True)
             else:
-                # Kruskal clássico sem afinidade térmica (puramente pelo calor)
                 arestas_ordenadas = sorted(calor.keys(), key=lambda e: calor[e], reverse=True)
 
             adj: Dict[int, List[int]] = {c: [] for c in cidades}
@@ -466,7 +652,6 @@ class QueimadaSolver(BaseSolver):
                         if arestas_adicionadas == n:
                             break
 
-            # Reconstrução do ciclo iniciando em 1
             rota = [1]
             atual = 1
             ant = None
@@ -478,12 +663,6 @@ class QueimadaSolver(BaseSolver):
                 atual = prox
 
         elif self.metodo_construcao == "backward_edges":
-            # Construção regressiva de trás para frente a partir da Cidade 1
-            # Prioriza encadear as arestas de maior calor relativo/afinidade na cauda do percurso.
-            gamma = self.gamma_afinidade
-            if self.adaptar_regime_r and self.modelo == "TTP1":
-                gamma = min(2.5, max(0.5, 0.5 + instance.taxa_aluguel / 2.0))
-
             def score_aresta_backward(u_node: int, v_node: int) -> float:
                 e_key = (min(u_node, v_node), max(u_node, v_node))
                 c_val = calor.get(e_key, 0.0)
@@ -504,15 +683,9 @@ class QueimadaSolver(BaseSolver):
                 nao_visitadas.remove(prox)
                 atual = prox
 
-            # Rota direta: as arestas adicionadas primeiro na cadeia reversa ficam no final da rota!
             rota = [1] + list(reversed(cadeia_reversa[1:]))
 
         elif self.metodo_construcao == "backward_directed":
-            # Construção regressiva com arcos direcionados de entrada: cand -> atual
-            gamma = self.gamma_afinidade
-            if self.adaptar_regime_r and self.modelo == "TTP1":
-                gamma = min(2.5, max(0.5, 0.5 + instance.taxa_aluguel / 2.0))
-
             def score_arco_backward(cand: int, target: int) -> float:
                 c_val = calor.get((cand, target), 0.0)
                 d_val = max(instance.grafo.distancia(cand, target), 0.001)
@@ -532,21 +705,13 @@ class QueimadaSolver(BaseSolver):
                 nao_visitadas.remove(prox)
                 atual = prox
 
-            # Inverte para que os arcos de maior calor de entrada fiquem no final da viagem:
             rota = [1] + list(reversed(cadeia_reversa[1:]))
 
         elif self.metodo_construcao == "forward_directed":
-            # Construção progressiva a partir da Cidade 1 com arcos direcionados de saída: atual -> cand
-            # Prioriza arcos mais frios no início da viagem
-            gamma = self.gamma_afinidade
-            if self.adaptar_regime_r and self.modelo == "TTP1":
-                gamma = min(2.5, max(0.5, 0.5 + instance.taxa_aluguel / 2.0))
-
             def score_arco_forward(orig: int, cand: int) -> float:
                 c_val = calor.get((orig, cand), 0.0)
                 d_val = max(instance.grafo.distancia(orig, cand), 0.001)
                 if self.afinidade_termica:
-                    # Menor calor tem prioridade; empate em frias desempata por menor distância
                     return (c_val * (d_val ** gamma)) + (1e-6 * d_val)
                 return c_val + (1e-6 * d_val)
 
@@ -562,9 +727,6 @@ class QueimadaSolver(BaseSolver):
                 nao_visitadas.remove(prox)
                 atual = prox
 
-        else:
-            raise ValueError(f"Método de construção inválido: {self.metodo_construcao}")
-
         # Refinamento de rota via 2-opt (se ativado)
         if self.refinamento_rota and n > 3:
             rota = otimizar_2opt(rota, instance.grafo)
@@ -573,7 +735,6 @@ class QueimadaSolver(BaseSolver):
         rota_rev = [1] + list(reversed(rota[1:]))
 
         if self.metodo_construcao in ("backward_edges", "backward_directed", "forward_directed"):
-            # Para métodos de arestas/arcos, avalia a concentração de calor ao longo da viagem
             if self.grafo_direcionado:
                 score_rota = sum(
                     calor.get((rota[i], rota[(i + 1) % n]), 0.0) * i
@@ -593,7 +754,6 @@ class QueimadaSolver(BaseSolver):
                     for i in range(n)
                 )
         else:
-            # Avalia a concentração de calor nos vértices ao longo da rota
             score_rota = sum(i * temperaturas.get(rota[i], 0.0) for i in range(n))
             score_rev = sum(i * temperaturas.get(rota_rev[i], 0.0) for i in range(n))
 
@@ -605,104 +765,141 @@ class QueimadaSolver(BaseSolver):
     def _selecionar_itens(
         self, instance: TTPInstance, rota: List[int]
     ) -> Dict[int, List[int]]:
-        """Seleciona os itens com base no valor relativo frente ao caminho percorrido."""
-        n = len(rota)
-        dist_restante: Dict[int, float] = {}
-        dist_acc = instance.grafo.distancia(rota[-1], rota[0])
-        dist_restante[rota[-1]] = dist_acc
-
-        for i in range(n - 2, -1, -1):
-            dist_acc += instance.grafo.distancia(rota[i], rota[i + 1])
-            dist_restante[rota[i]] = dist_acc
-
-        v_avg = (instance.v_max + instance.v_min) / 2.0
-        cap_mochila = max(instance.capacidade_mochila, 1e-6)
-        const_deg = max(instance.constante_degradacao, 1e-6)
-
-        # Cálculo do lucro líquido estimado para cada item
-        itens_com_lucro: List[Tuple[float, Item]] = []
-        for item in instance.itens:
-            if item.peso <= 0:
-                continue
-            d_rest = dist_restante.get(item.cidade_origem, 0.0)
-
-            if self.modelo == "TTP2":
-                # TTP2: degradação temporal do valor
-                v_depois = max(
-                    instance.v_min,
-                    instance.v_max
-                    - item.peso * ((instance.v_max - instance.v_min) / cap_mochila),
-                )
-                tempo_restante = d_rest / v_depois
-                degradacao = math.ceil(tempo_restante / const_deg)
-                lucro_liquido = item.valor - degradacao
-            else:
-                # TTP1: custo de aluguel por atraso
-                custo_transporte = (
-                    instance.taxa_aluguel
-                    * d_rest
-                    * ((instance.v_max - instance.v_min) / (cap_mochila * (v_avg ** 2)))
-                    * item.peso
-                )
-                lucro_liquido = item.valor - custo_transporte
-
-            if lucro_liquido > 0:
-                itens_com_lucro.append((lucro_liquido, item))
-
-        plano_coleta: Dict[int, List[int]] = {}
-
-        if self.selecao_modo == "greedy_relative":
-            if self.ordem_selecao == "densidade":
-                itens_com_lucro.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
-                peso_atual = 0.0
-                for _, item in itens_com_lucro:
-                    if peso_atual + item.peso <= instance.capacidade_mochila:
-                        peso_atual += item.peso
-                        if item.cidade_origem not in plano_coleta:
-                            plano_coleta[item.cidade_origem] = []
-                        plano_coleta[item.cidade_origem].append(item.id)
-            elif self.ordem_selecao == "reversa":
-                cidades_reversas = [c for c in reversed(rota) if c != 1]
-                peso_atual = 0.0
-                for cid in cidades_reversas:
-                    itens_cid = [x for x in itens_com_lucro if x[1].cidade_origem == cid]
-                    itens_cid.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
-                    for _, item in itens_cid:
-                        if peso_atual + item.peso <= instance.capacidade_mochila:
-                            peso_atual += item.peso
-                            if cid not in plano_coleta:
-                                plano_coleta[cid] = []
-                            plano_coleta[cid].append(item.id)
-            elif self.ordem_selecao == "sequencial":
-                cidades_seq = [c for c in rota if c != 1]
-                peso_atual = 0.0
-                for cid in cidades_seq:
-                    itens_cid = [x for x in itens_com_lucro if x[1].cidade_origem == cid]
-                    itens_cid.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
-                    for _, item in itens_cid:
-                        if peso_atual + item.peso <= instance.capacidade_mochila:
-                            peso_atual += item.peso
-                            if cid not in plano_coleta:
-                                plano_coleta[cid] = []
-                            plano_coleta[cid].append(item.id)
-            else:
-                raise ValueError(f"Ordem de seleção de cidades inválida: {self.ordem_selecao}")
-
-        elif self.selecao_modo == "knapsack_relative":
-            itens_adaptados = [
-                Item(id=item.id, peso=item.peso, valor=lucro, cidade_origem=item.cidade_origem)
-                for lucro, item in itens_com_lucro
-            ]
-            _, selecionados = resolver_knapsack_01_exato(
-                itens_adaptados, instance.capacidade_mochila
-            )
-            for item in selecionados:
-                if item.cidade_origem not in plano_coleta:
-                    plano_coleta[item.cidade_origem] = []
-                plano_coleta[item.cidade_origem].append(item.id)
-
-        else:
+        """
+        Seleciona os itens com base no valor relativo frente ao caminho percorrido.
+        Memoiza tanto o empacotamento inicial quanto o refinamento Drop & Add pela chave `tuple(rota)`,
+        reaproveitando 100% do trabalho quando configurações distintas convergem para a mesma rota
+        ou entre `otimizar_buracos=False` e `otimizar_buracos=True`.
+        """
+        if self.selecao_modo not in ("greedy_relative", "knapsack_relative"):
             raise ValueError(f"Modo de seleção de itens inválido: {self.selecao_modo}")
+        if self.selecao_modo == "greedy_relative" and self.ordem_selecao not in ("densidade", "reversa", "sequencial"):
+            raise ValueError(f"Ordem de seleção de cidades inválida: {self.ordem_selecao}")
+
+        cache = obter_cache_ram_global()
+        inst_key = _chave_instancia(instance)
+        rota_tuple = tuple(rota)
+        ordem_efetiva = "densidade" if self.selecao_modo == "knapsack_relative" else self.ordem_selecao
+
+        full_key = (
+            "stage4_plano",
+            inst_key,
+            rota_tuple,
+            self.selecao_modo,
+            ordem_efetiva,
+            bool(self.refinamento),
+            self.modelo,
+        )
+        cached_full = cache.get(full_key)
+        if cached_full is not None:
+            return {cid: list(ids) for cid, ids in cached_full.items()}
+
+        # Verifica se o plano base (sem Drop & Add) já foi calculado para esta mesma rota
+        base_key = (
+            "stage4_plano_base",
+            inst_key,
+            rota_tuple,
+            self.selecao_modo,
+            ordem_efetiva,
+            self.modelo,
+        )
+        cached_base = cache.get(base_key)
+
+        if cached_base is not None:
+            plano_coleta: Dict[int, List[int]] = {cid: list(ids) for cid, ids in cached_base.items()}
+        else:
+            n = len(rota)
+            dist_restante: Dict[int, float] = {}
+            dist_acc = instance.grafo.distancia(rota[-1], rota[0])
+            dist_restante[rota[-1]] = dist_acc
+
+            for i in range(n - 2, -1, -1):
+                dist_acc += instance.grafo.distancia(rota[i], rota[i + 1])
+                dist_restante[rota[i]] = dist_acc
+
+            v_avg = (instance.v_max + instance.v_min) / 2.0
+            cap_mochila = max(instance.capacidade_mochila, 1e-6)
+            const_deg = max(instance.constante_degradacao, 1e-6)
+
+            itens_com_lucro: List[Tuple[float, Item]] = []
+            for item in instance.itens:
+                if item.peso <= 0:
+                    continue
+                d_rest = dist_restante.get(item.cidade_origem, 0.0)
+
+                if self.modelo == "TTP2":
+                    v_depois = max(
+                        instance.v_min,
+                        instance.v_max
+                        - item.peso * ((instance.v_max - instance.v_min) / cap_mochila),
+                    )
+                    tempo_restante = d_rest / v_depois
+                    degradacao = math.ceil(tempo_restante / const_deg)
+                    lucro_liquido = item.valor - degradacao
+                else:
+                    custo_transporte = (
+                        instance.taxa_aluguel
+                        * d_rest
+                        * ((instance.v_max - instance.v_min) / (cap_mochila * (v_avg ** 2)))
+                        * item.peso
+                    )
+                    lucro_liquido = item.valor - custo_transporte
+
+                if lucro_liquido > 0:
+                    itens_com_lucro.append((lucro_liquido, item))
+
+            plano_coleta = {}
+
+            if self.selecao_modo == "greedy_relative":
+                if self.ordem_selecao == "densidade":
+                    itens_com_lucro.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
+                    peso_atual = 0.0
+                    for _, item in itens_com_lucro:
+                        if peso_atual + item.peso <= instance.capacidade_mochila:
+                            peso_atual += item.peso
+                            if item.cidade_origem not in plano_coleta:
+                                plano_coleta[item.cidade_origem] = []
+                            plano_coleta[item.cidade_origem].append(item.id)
+                elif self.ordem_selecao in ("reversa", "sequencial"):
+                    por_cidade: Dict[int, List[Tuple[float, Item]]] = {}
+                    for par in itens_com_lucro:
+                        cid = par[1].cidade_origem
+                        if cid not in por_cidade:
+                            por_cidade[cid] = []
+                        por_cidade[cid].append(par)
+
+                    cidades_iter = (
+                        [c for c in reversed(rota) if c != 1]
+                        if self.ordem_selecao == "reversa"
+                        else [c for c in rota if c != 1]
+                    )
+                    peso_atual = 0.0
+                    for cid in cidades_iter:
+                        itens_cid = por_cidade.get(cid)
+                        if not itens_cid:
+                            continue
+                        itens_cid.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
+                        for _, item in itens_cid:
+                            if peso_atual + item.peso <= instance.capacidade_mochila:
+                                peso_atual += item.peso
+                                if cid not in plano_coleta:
+                                    plano_coleta[cid] = []
+                                plano_coleta[cid].append(item.id)
+
+            elif self.selecao_modo == "knapsack_relative":
+                itens_adaptados = [
+                    Item(id=item.id, peso=item.peso, valor=lucro, cidade_origem=item.cidade_origem)
+                    for lucro, item in itens_com_lucro
+                ]
+                _, selecionados = resolver_knapsack_01_exato(
+                    itens_adaptados, instance.capacidade_mochila
+                )
+                for item in selecionados:
+                    if item.cidade_origem not in plano_coleta:
+                        plano_coleta[item.cidade_origem] = []
+                    plano_coleta[item.cidade_origem].append(item.id)
+
+            cache.set(base_key, {cid: tuple(ids) for cid, ids in plano_coleta.items()})
 
         if self.refinamento:
             from src.solvers.pack_iterative import refinar_plano_coleta
@@ -710,14 +907,20 @@ class QueimadaSolver(BaseSolver):
                 instance, rota, plano_coleta, modelo=self.modelo
             )
 
+        cache.set(full_key, {cid: tuple(ids) for cid, ids in plano_coleta.items()})
         return plano_coleta
 
     def solve(self, instance: TTPInstance) -> SolucaoTTP:
         # 1. Calcular temperatura de cada vértice
         temperaturas = self._calcular_temperaturas(instance)
 
-        # 2. Dissipar calor pelas arestas
-        calor = self._dissipar_calor(instance, temperaturas)
+        # 2. Dissipar calor pelas arestas (usa matriz Numba rápida quando disponível)
+        if NUMBA_AVAILABLE and _grafo_eh_denso(instance):
+            calor: Union[Dict[Tuple[int, int], float], np.ndarray] = self._dissipar_calor_matriz_interna(
+                instance, temperaturas
+            )
+        else:
+            calor = self._dissipar_calor(instance, temperaturas)
 
         # 3. Construir a rota a partir do calor acumulado
         rota = self._construir_rota(instance, calor, temperaturas)

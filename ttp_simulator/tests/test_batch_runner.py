@@ -7,6 +7,12 @@ import pytest
 from src.core.models import SolucaoTTP, TTPInstance
 from src.runners.batch_runner import BatchRunner
 from src.solvers.base import BaseSolver, SolverRegistry
+from src.utils.results_manager import (
+    classificar_instancia_cenarios,
+    obter_destinos_registro,
+    obter_familias_solver,
+    propagar_registro_3x3,
+)
 
 
 class SimpleUserSolver(BaseSolver):
@@ -28,10 +34,10 @@ def registrar_user_solver():
     yield
 
 
+def test_batch_runner():
     test_dir = Path(__file__).resolve().parent.parent / "bateria_testes"
     if not test_dir.exists():
         test_dir = Path("bateria_testes")
-    # Usa arquivo de teste pequeno existente
     instancia_txt = test_dir / "instancia_01.txt"
     assert instancia_txt.exists()
 
@@ -47,13 +53,12 @@ def registrar_user_solver():
             output_csv=out_csv,
             base_seed=100,
             workers=2,
-            resume=False
+            resume=False,
+            propagar_resultados=False,
         )
-        # Filtra para executar apenas sobre instancia_01.txt para teste rápido
         runner._obter_arquivos_instancias = lambda: [instancia_txt]
         runner.run()
 
-        # Verifica se o CSV foi gerado com os resultados do custom solver
         with open(out_csv, "r", encoding="utf-8") as f:
             linhas = list(csv.DictReader(f))
             assert len(linhas) == 2
@@ -70,10 +75,10 @@ def registrar_user_solver():
             output_csv=out_csv,
             base_seed=100,
             workers=1,
-            resume=True
+            resume=True,
+            propagar_resultados=False,
         )
         runner_resume._obter_arquivos_instancias = lambda: [instancia_txt]
-        # Não deve adicionar novas linhas pois já existe
         runner_resume.run()
 
         with open(out_csv, "r", encoding="utf-8") as f:
@@ -83,3 +88,52 @@ def registrar_user_solver():
     finally:
         if os.path.exists(out_csv):
             os.remove(out_csv)
+
+
+def test_cenarios_e_propagacao():
+    # 1. Verifica classificação hierárquica
+    assert classificar_instancia_cenarios("instancia_01.txt") == ["lucrativas", "equilibradas", "completo"]
+    assert classificar_instancia_cenarios("138.ttp") == ["equilibradas", "completo"]
+    assert classificar_instancia_cenarios("50.ttp") == ["completo"]
+
+    # 2. Verifica famílias de solvers
+    assert obter_familias_solver("queimada") == ["queimada", "todos"]
+    assert obter_familias_solver("queimada_com_2opt") == ["queimada", "todos"]
+    assert obter_familias_solver("heuristic_37_refinada") == ["heuristica_37", "todos"]
+    assert obter_familias_solver("pack_iterative") == ["todos"]
+
+    # 3. Verifica destinos da matriz 3x3
+    destinos_q = obter_destinos_registro("queimada", "instancia_01.txt")
+    nomes_destinos_q = {f"{p.parent.name}/{p.name}" for p in destinos_q}
+    assert "queimada/lucrativas.csv" in nomes_destinos_q
+    assert "queimada/equilibradas.csv" in nomes_destinos_q
+    assert "queimada/completo.csv" in nomes_destinos_q
+    assert "todos/lucrativas.csv" in nomes_destinos_q
+    assert "todos/equilibradas.csv" in nomes_destinos_q
+    assert "todos/completo.csv" in nomes_destinos_q
+    assert len(destinos_q) == 6
+
+    # 4. Verifica filtro de instâncias por cenário no BatchRunner
+    test_dir = Path(__file__).resolve().parent.parent / "bateria_testes"
+    if test_dir.exists():
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tf:
+            temp_dummy = tf.name
+        try:
+            r_luc = BatchRunner(test_dir=str(test_dir), solvers=["random"], models=["TTP1"], runs=1,
+                                output_csv=temp_dummy, base_seed=1, cenario="lucrativas")
+            r_eq = BatchRunner(test_dir=str(test_dir), solvers=["random"], models=["TTP1"], runs=1,
+                               output_csv=temp_dummy, base_seed=1, cenario="equilibradas")
+            r_comp = BatchRunner(test_dir=str(test_dir), solvers=["random"], models=["TTP1"], runs=1,
+                                output_csv=temp_dummy, base_seed=1, cenario="completo")
+
+            inst_luc = r_luc._obter_arquivos_instancias()
+            inst_eq = r_eq._obter_arquivos_instancias()
+            inst_comp = r_comp._obter_arquivos_instancias()
+
+            assert len(inst_luc) <= len(inst_eq)
+            assert len(inst_eq) <= len(inst_comp)
+            assert len(inst_luc) == 23
+            assert len(inst_eq) >= 34
+        finally:
+            if os.path.exists(temp_dummy):
+                os.remove(temp_dummy)
