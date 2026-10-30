@@ -96,8 +96,8 @@ def executar_orquestrador(
     pasta_resultados = _raiz / "results"
     pasta_resultados.mkdir(parents=True, exist_ok=True)
 
-    csv_detalhado = output_solucoes or str(pasta_resultados / "bateria_solucoes_detalhada.csv")
-    csv_estatisticas = output_stats or str(pasta_resultados / "comparativo_estatisticas_ttp1_ttp2.csv")
+    csv_detalhado = output_solucoes or str(pasta_resultados / "todos" / "completo.csv")
+    csv_estatisticas = output_stats or str(None)
 
     modelos = modelos_lista or ["TTP1"]
 

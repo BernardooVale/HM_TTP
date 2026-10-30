@@ -3,20 +3,23 @@ Grid Search Paralelo de Alto Desempenho para a Heurística da Queimada no TTP.
 
 Recursos:
 - Multiprocessamento nativo com número configurável de workers (--workers).
-- Suporte a múltiplos espaços de busca:
-    * 'completo': 2.880 combinações únicas (incluindo backward_edges, 2-opt, afinidade térmica e otimização de buracos).
+- Suporte a múltiplos espaços de busca estruturais:
+    * 'completo': espaço unificado com métodos clássicos e as novas variantes de grafo direcionado.
+    * 'direcionado': focado exclusivamente nas variantes de grafo direcionado (backward_directed e forward_directed).
     * 'padrao': 288 combinações clássicas do grid_search_queimada.py.
     * 'rapido': combinações construtivas sem 2-opt global / sem Drop & Add pesado (ultra-rápido).
 - Suporte a seleção flexível de instâncias de bateria_testes (todas, leves, sintéticas ou arquivos específicos).
 - Poda automática de configurações redundantes (ex: afinidade térmica em walk, ordens em knapsack exato).
 - Cache inteligente de instâncias por processo worker.
+- Retomada Automática (Resume) sem recalcular execuções já salvas no histórico.
 - Barra de progresso com taxa de throughput (execuções/segundo) e ETA.
 - Ranking Top N das melhores configurações, análise de impacto marginal de parâmetros e exportação em CSV.
+- Auto-atualização dinâmica da melhor configuração no config_manager.py para os testes globais.
 
 Uso:
-    python grid_search_paralelo.py --help
-    python grid_search_paralelo.py --instancias sinteticas --espaco completo
-    python grid_search_paralelo.py --instancias leves --workers 8 --espaco completo
+    python scripts/experimentos_queimada/grid_search_paralelo.py --help
+    python scripts/experimentos_queimada/grid_search_paralelo.py --espaco direcionado --instancias sinteticas
+    python scripts/experimentos_queimada/grid_search_paralelo.py --espaco completo --instancias leves --workers 8
 """
 
 import argparse
@@ -51,6 +54,7 @@ from src.core.evaluator_ttp2 import avaliar_ttp2
 from src.scenarios.parser import InstanceParser
 from src.solvers.base import SolverRegistry
 from src.solvers.queimada import QueimadaSolver
+from src.utils.results_manager import resolver_caminho_csv
 
 
 # Cache por processo worker para evitar recarga repetida de disco
@@ -69,6 +73,10 @@ def _worker_executar_config(args: Tuple[str, Dict[str, Any], int, str]) -> Dict[
     instance = _WORKER_CACHE[caminho_arquivo]
     nome_inst = Path(caminho_arquivo).name
 
+    grafo_dir = cfg.get("grafo_direcionado")
+    if grafo_dir is None:
+        grafo_dir = cfg["metodo_construcao"] in ("backward_directed", "forward_directed")
+
     solver = QueimadaSolver(
         temperatura=cfg["temperatura"],
         dissipacao=cfg["dissipacao"],
@@ -80,6 +88,7 @@ def _worker_executar_config(args: Tuple[str, Dict[str, Any], int, str]) -> Dict[
         selecao=cfg["selecao"],
         ordem_selecao=cfg["ordem_selecao"],
         refinamento=cfg["refinamento"],
+        grafo_direcionado=grafo_dir,
         modelo=modelo,
     )
 
@@ -103,9 +112,49 @@ def _worker_executar_config(args: Tuple[str, Dict[str, Any], int, str]) -> Dict[
     }
 
 
+# Padrões canônicos para quando uma coluna for adicionada no futuro e não existir em CSVs antigos
+DEFAULTS_PARAMETROS: Dict[str, Any] = {
+    "temperatura": "total_value",
+    "dissipacao": "dijkstra",
+    "direcao": "calor_final",
+    "metodo_construcao": "kruskal",
+    "afinidade_termica": True,
+    "refinamento_rota": True,
+    "otimizar_buracos": False,
+    "grafo_direcionado": False,
+    "selecao": "greedy_relative",
+    "ordem_selecao": "densidade",
+    "refinamento": False,
+}
+
+
+def _obter_assinatura_config(cfg: Dict[str, Any], chaves_schema: Optional[List[str]] = None) -> Tuple:
+    """
+    Gera uma assinatura imutável dos parâmetros de uma configuração para deduplicação robusta.
+    Adapta-se dinamicamente ao schema de parâmetros: qualquer coluna nova ausente em execuções
+    antigas registradas no CSV assume automaticamente o valor padrão daquela funcionalidade
+    (False para flags booleanas desligadas no passado).
+    """
+    chaves = chaves_schema or sorted(cfg.keys())
+    valores = []
+    for k in chaves:
+        if k in ("config_id", "instancia", "lucro_G", "tempo_viagem", "peso", "qtd_itens", "tempo_cpu_ms"):
+            continue
+        val = cfg.get(k)
+        if val is None or val == "":
+            val = DEFAULTS_PARAMETROS.get(k, False)
+
+        if isinstance(val, bool) or str(val).strip().lower() in ("true", "false", "1", "0"):
+            val_norm = str(val).strip().lower() in ("true", "1")
+        else:
+            val_norm = str(val).strip()
+        valores.append((k, val_norm))
+    return tuple(valores)
+
+
 def gerar_espaco_configuracoes(tipo_espaco: str = "completo", deduplicar: bool = True) -> List[Dict[str, Any]]:
     """
-    Gera o conjunto de configurações para o grid search.
+    Gera o conjunto de configurações para o grid search estrutural da Queimada.
     """
     temperaturas = ["total_value", "knapsack_exact", "knapsack_greedy"]
     dissipacoes = ["adjacent_only", "dijkstra", "bfs"]
@@ -134,12 +183,44 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "completo", deduplicar: bool =
                 "selecao": sel,
                 "ordem_selecao": ordem,
                 "refinamento": ref,
+                "grafo_direcionado": False,
+            })
+        return configuracoes
+
+    elif tipo_espaco == "direcionado":
+        # Espaço focado nas novas variantes de fluxo térmico em grafo direcionado
+        metodos = ["backward_directed", "forward_directed"]
+        afinidades = [False, True]
+        rotas_2opt = [False, True]
+        buracos_opts = [False, True]
+        refinamentos = [False, True]
+
+        configuracoes = []
+        for temp, diss, direcao, metodo, afin, r_2opt, buraco, sel, ordem, ref in itertools.product(
+            temperaturas, dissipacoes, direcoes, metodos, afinidades, rotas_2opt, buracos_opts, selecoes, ordens, refinamentos
+        ):
+            if deduplicar:
+                if sel == "knapsack_relative" and ordem != "densidade":
+                    continue
+
+            configuracoes.append({
+                "temperatura": temp,
+                "dissipacao": diss,
+                "direcao": direcao,
+                "metodo_construcao": metodo,
+                "afinidade_termica": afin,
+                "refinamento_rota": r_2opt,
+                "otimizar_buracos": buraco,
+                "selecao": sel,
+                "ordem_selecao": ordem,
+                "refinamento": ref,
+                "grafo_direcionado": True,
             })
         return configuracoes
 
     elif tipo_espaco == "rapido":
-        # Versão ultra-rápida: compara métodos construtivos e otimização de buracos sem Drop&Add/2opt pesado
-        metodos = ["walk", "kruskal", "backward_edges"]
+        # Versão ultra-rápida: métodos construtivos e otimização de buracos sem Drop&Add/2opt pesado
+        metodos = ["walk", "kruskal", "backward_edges", "backward_directed", "forward_directed"]
         buracos_opts = [False, True]
         afinidades = [False, True]
         configuracoes = []
@@ -162,12 +243,13 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "completo", deduplicar: bool =
                 "selecao": sel,
                 "ordem_selecao": ordem,
                 "refinamento": False,
+                "grafo_direcionado": metodo in ("backward_directed", "forward_directed"),
             })
         return configuracoes
 
     elif tipo_espaco == "completo":
-        # Espaço completo com todas as novas opções estratégicas da Queimada
-        metodos = ["walk", "kruskal", "backward_edges"]
+        # Espaço completo unificado com todas as opções estratégicas clássicas e as novas direcionadas
+        metodos = ["walk", "kruskal", "backward_edges", "backward_directed", "forward_directed"]
         afinidades = [False, True]
         rotas_2opt = [False, True]
         buracos_opts = [False, True]
@@ -178,7 +260,7 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "completo", deduplicar: bool =
             temperaturas, dissipacoes, direcoes, metodos, afinidades, rotas_2opt, buracos_opts, selecoes, ordens, refinamentos
         ):
             if deduplicar:
-                # Quando selecao é knapsack_relative, a ordem de varredura gulosa é irrelevante
+                # Quando seleção é knapsack_relative, a ordem de varredura gulosa é irrelevante
                 if sel == "knapsack_relative" and ordem != "densidade":
                     continue
                 # Quando método é walk (guloso sequencial), afinidade térmica não é usada
@@ -196,11 +278,12 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "completo", deduplicar: bool =
                 "selecao": sel,
                 "ordem_selecao": ordem,
                 "refinamento": ref,
+                "grafo_direcionado": metodo in ("backward_directed", "forward_directed"),
             })
         return configuracoes
 
     else:
-        raise ValueError(f"Espaço de busca inválido: {tipo_espaco}. Escolha entre 'completo', 'padrao', 'rapido'.")
+        raise ValueError(f"Espaço de busca inválido: {tipo_espaco}. Escolha entre 'completo', 'direcionado', 'padrao', 'rapido'.")
 
 
 def resolver_instancias(
@@ -209,7 +292,7 @@ def resolver_instancias(
     arquivos_especificos: Optional[List[str]] = None,
 ) -> List[Path]:
     """Retorna a lista de caminhos absolutos das instâncias a processar."""
-    pasta_testes = _raiz / "ttp_simulator" / "bateria_testes"
+    pasta_testes = _sim_path / "bateria_testes"
     if not pasta_testes.exists():
         pasta_testes = _raiz / "bateria_testes"
 
@@ -225,12 +308,12 @@ def resolver_instancias(
 
     todos_arquivos = [f for f in pasta_testes.iterdir() if f.is_file() and f.suffix in (".txt", ".ttp")]
 
-    if opcao_instancias == "sinteticas":
+    if opcao_instancias in ("equilibradas", "todas"):
+        arquivos = todos_arquivos
+    elif opcao_instancias == "sinteticas":
         arquivos = [f for f in todos_arquivos if f.suffix == ".txt"]
     elif opcao_instancias == "leves":
         arquivos = [f for f in todos_arquivos if not f.name.startswith("a280_")]
-    elif opcao_instancias == "todas":
-        arquivos = todos_arquivos
     else:
         # Tenta interpretar como padrão glob ou nome único
         arquivos = list(pasta_testes.glob(opcao_instancias))
@@ -270,13 +353,20 @@ def executar_grid_search(
     total_configs = len(configuracoes)
     total_tarefas = total_instancias * total_configs
 
-    # Define caminho de saída do CSV logo no início para suportar Resume
+    # Define caminho canônico de saída do CSV (em results/grid_search/)
     if arquivo_csv is None:
-        caminho_results = _raiz / "results"
-        caminho_results.mkdir(parents=True, exist_ok=True)
-        arquivo_csv = str(caminho_results / f"grid_search_queimada_{espaco}.csv")
+        arquivo_csv_path = resolver_caminho_csv(f"grid_search_queimada_{espaco}.csv")
+    else:
+        arquivo_csv_path = resolver_caminho_csv(arquivo_csv)
 
-    arquivo_csv_path = Path(arquivo_csv).resolve()
+    arquivo_csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    chaves_parametros = sorted(list(configuracoes[0].keys()))
+
+    # Mapa de assinaturas de configuração para IDs para recuperação exata em CSVs existentes
+    mapa_sig_para_id: Dict[Tuple, int] = {
+        _obter_assinatura_config(cfg, chaves_parametros): idx for idx, cfg in enumerate(configuracoes)
+    }
 
     # Estruturas de agregação e conjunto de tarefas concluídas (para Resume)
     concluidas_set: set = set()
@@ -299,6 +389,24 @@ def executar_grid_search(
 
     # Leitura prévia do CSV para retomada automática (Resume)
     if arquivo_csv_path.exists() and arquivo_csv_path.stat().st_size > 0:
+        # Garante alinhamento de cabeçalho com quaisquer novas colunas adicionadas no futuro
+        try:
+            with open(arquivo_csv_path, "r", encoding="utf-8", errors="ignore") as f_chk:
+                primeira_linha = f_chk.readline()
+            delimitador = ";" if ";" in primeira_linha else ","
+            colunas_existentes = [c.strip() for c in primeira_linha.split(delimitador) if c.strip()]
+            colunas_faltantes = [h for h in headers if h not in colunas_existentes]
+            if colunas_faltantes:
+                nova_primeira = primeira_linha.strip() + delimitador + delimitador.join(colunas_faltantes) + "\n"
+                with open(arquivo_csv_path, "r", encoding="utf-8", errors="ignore") as f_in:
+                    f_in.readline()
+                    resto = f_in.read()
+                with open(arquivo_csv_path, "w", encoding="utf-8") as f_out:
+                    f_out.write(nova_primeira + resto)
+                print(f"📌 Cabeçalho do CSV legado atualizado automaticamente com novas colunas: {colunas_faltantes}")
+        except Exception as e:
+            print(f"⚠️ Aviso ao verificar cabeçalho do CSV existente: {e}")
+
         try:
             with open(arquivo_csv_path, "r", encoding="utf-8", errors="ignore") as f_prev:
                 primeira = f_prev.readline()
@@ -307,16 +415,27 @@ def executar_grid_search(
                 reader = csv.DictReader(f_prev, delimiter=delimitador)
                 for row in reader:
                     try:
-                        c_id = int(row["config_id"])
                         inst_nome = row["instancia"].strip()
                         g = float(row["lucro_G"])
                         tv = float(row["tempo_viagem"])
                         cpu = float(row["tempo_cpu_ms"])
 
-                        concluidas_set.add((c_id, inst_nome))
-                        lucros_por_config[c_id].append(g)
-                        tempos_v_por_config[c_id].append(tv)
-                        tempos_cpu_por_config[c_id].append(cpu)
+                        row_sig = _obter_assinatura_config(row, chaves_parametros)
+                        if row_sig in mapa_sig_para_id:
+                            c_id = mapa_sig_para_id[row_sig]
+                        elif "config_id" in row:
+                            try:
+                                c_id = int(row["config_id"])
+                            except ValueError:
+                                continue
+                        else:
+                            continue
+
+                        if c_id < len(configuracoes):
+                            concluidas_set.add((c_id, inst_nome))
+                            lucros_por_config[c_id].append(g)
+                            tempos_v_por_config[c_id].append(tv)
+                            tempos_cpu_por_config[c_id].append(cpu)
                     except (ValueError, KeyError):
                         continue
 
@@ -338,9 +457,9 @@ def executar_grid_search(
     total_pendentes = len(tarefas)
     concluidas_historico = len(concluidas_set)
 
-    print("\n" + "=" * 115)
-    print(f"{'GRID SEARCH PARALELO DE ALTO RENDIMENTO - HEURÍSTICA DA QUEIMADA':^115}")
-    print("=" * 115)
+    print("\n" + "=" * 125)
+    print(f"{'AVALIAÇÃO ESTRUTURAL PARALELA DA HEURÍSTICA DA QUEIMADA':^125}")
+    print("=" * 125)
     print(f"• Espaço de busca:      {espaco.upper()} ({total_configs:,} configurações únicas)")
     print(f"• Instâncias alvo:      {total_instancias} arquivos de teste")
     print(f"• Modelo avaliado:      {modelo}")
@@ -349,7 +468,7 @@ def executar_grid_search(
     print(f"• Já concluídas (disco):{concluidas_historico:,} tarefas ({concluidas_historico / max(total_tarefas, 1) * 100:.1f}%)")
     print(f"• Pendentes a executar: {total_pendentes:,} tarefas")
     print(f"• Destino dos dados:    {arquivo_csv_path}")
-    print("=" * 115 + "\n")
+    print("=" * 125 + "\n")
 
     concluidas_sessao = 0
     t_inicio = time.perf_counter()
@@ -359,20 +478,17 @@ def executar_grid_search(
     if total_pendentes > 0:
         print("🚀 Iniciando processamento com salvamento incremental atômico...\n")
 
-        # Abre o arquivo CSV para gravação incremental (append ou write com cabeçalho)
         with open(arquivo_csv_path, modo_abertura, newline="", encoding="utf-8") as f_csv:
             csv_writer = csv.DictWriter(f_csv, fieldnames=headers)
             if escrever_cabecalho:
                 csv_writer.writeheader()
                 f_csv.flush()
 
-            # Janela deslizante de tarefas ativas para consumo de memória controlado e resposta imediata ao Ctrl+C
             MAX_PENDENTES = max(workers * 4, 32)
             tarefas_iter = iter(tarefas)
             futuros: Dict[concurrent.futures.Future, Tuple] = {}
 
             with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
-                # Enfileira primeiras tarefas
                 for t in itertools.islice(tarefas_iter, MAX_PENDENTES):
                     fut = executor.submit(_worker_executar_config, t)
                     futuros[fut] = t
@@ -403,7 +519,6 @@ def executar_grid_search(
                                         "tempo_cpu_ms": res["tempo_cpu_ms"],
                                         **cfg_ref,
                                     }
-                                    # Gravação incremental e flush direto no disco
                                     csv_writer.writerow(linha_csv)
                                     f_csv.flush()
 
@@ -428,7 +543,6 @@ def executar_grid_search(
                             except Exception as exc:
                                 print(f"\n[FALHA NA TAREFA {t[0]}]: {exc}")
 
-                            # Submete a próxima tarefa caso não tenha ocorrido Ctrl+C
                             if not interrompido:
                                 prox = next(tarefas_iter, None)
                                 if prox is not None:
@@ -449,16 +563,16 @@ def executar_grid_search(
                         executor.shutdown(wait=False, cancel_futures=True)
                         break
     else:
-        print("🎉 Todas as tarefas deste grid search já estão concluídas e salvas no disco!")
+        print("🎉 Todas as tarefas desta avaliação já estão concluídas e salvas no disco!")
 
     t_total = time.perf_counter() - t_inicio
     total_final = concluidas_historico + concluidas_sessao
-    print(f"\n\n{'='*115}")
+    print(f"\n\n{'='*125}")
     if interrompido:
         print(f"🛑 Sessão interrompida em {t_total:.2f}s (+{concluidas_sessao:,} novas tarefas salvas | Total acumulado: {total_final:,})")
     else:
         print(f"✨ Concluído em {t_total:.2f}s ({total_final:,} execuções consolidadas | Taxa da sessão: {concluidas_sessao / max(t_total, 0.001):.1f} exec/s)")
-    print("=" * 115)
+    print("=" * 125)
 
     if not lucros_por_config:
         print("Nenhum resultado para exibir.")
@@ -474,15 +588,15 @@ def executar_grid_search(
 
     ranking.sort(key=lambda x: x[0], reverse=True)
 
-    print(f"\n{'='*115}")
-    print(f"{f'TOP {min(top_n, len(ranking))} MELHORES CONFIGURAÇÕES DA HEURÍSTICA DA QUEIMADA ({modelo})':^115}")
-    print("=" * 115)
+    print(f"\n{'='*125}")
+    print(f"{f'TOP {min(top_n, len(ranking))} MELHORES CONFIGURAÇÕES DA HEURÍSTICA DA QUEIMADA ({modelo})':^125}")
+    print("=" * 125)
     header = (
-        f"{'Rank':<5} | {'Construção':<14} | {'Buracos':<7} | {'2-Opt':<5} | "
-        f"{'Afin':<5} | {'Direção':<11} | {'Seleção':<15} | {'Ordem':<10} | {'Refin':<5} | {'Lucro Médio (G)':>14}"
+        f"{'Rank':<5} | {'Construção':<22} | {'Buracos':<7} | {'2-Opt':<5} | "
+        f"{'Afin':<5} | {'Direção':<11} | {'Seleção':<15} | {'Ordem':<10} | {'Refin':<5} | {'Dir':<4} | {'Lucro Médio (G)':>14}"
     )
     print(header)
-    print("-" * 115)
+    print("-" * 125)
 
     for rank_idx, (med_g, med_tv, med_cpu, c_id) in enumerate(ranking[:top_n], 1):
         c = configuracoes[c_id]
@@ -490,10 +604,11 @@ def executar_grid_search(
         opt_str = "SIM" if c.get("refinamento_rota") else "NÃO"
         afin_str = "SIM" if c.get("afinidade_termica") else "NÃO"
         ref_str = "SIM" if c.get("refinamento") else "NÃO"
+        dir_str = "SIM" if c.get("grafo_direcionado") else "NÃO"
 
         print(
-            f"{rank_idx:<5} | {c['metodo_construcao']:<14} | {buraco_str:<7} | {opt_str:<5} | "
-            f"{afin_str:<5} | {c['direcao']:<11} | {c['selecao']:<15} | {c['ordem_selecao']:<10} | {ref_str:<5} | {med_g:>14.2f}"
+            f"{rank_idx:<5} | {c['metodo_construcao']:<22} | {buraco_str:<7} | {opt_str:<5} | "
+            f"{afin_str:<5} | {c['direcao']:<11} | {c['selecao']:<15} | {c['ordem_selecao']:<10} | {ref_str:<5} | {dir_str:<4} | {med_g:>14.2f}"
         )
 
     # Auto-atualização dinâmica da configuração campeã no config_manager
@@ -517,13 +632,14 @@ def executar_grid_search(
             print(f"\n⚠️ Falha ao atualizar configuração campeã: {e}")
 
     # Análise de Impacto Marginal por Parâmetro
-    print(f"\n{'='*115}")
-    print(f"{'ANÁLISE DE IMPACTO MARGINAL POR PARÂMETRO (LUCRO MÉDIO G)':^115}")
-    print("=" * 115)
+    print(f"\n{'='*125}")
+    print(f"{'ANÁLISE DE IMPACTO MARGINAL POR PARÂMETRO (LUCRO MÉDIO G)':^125}")
+    print("=" * 125)
 
     parametros_analise = [
         "metodo_construcao",
         "otimizar_buracos",
+        "grafo_direcionado",
         "refinamento_rota",
         "afinidade_termica",
         "direcao",
@@ -551,23 +667,23 @@ def executar_grid_search(
 
     # Confirmação de persistência
     print(f"\n📁 Todos os resultados consolidados foram gravados no disco em:\n   {arquivo_csv_path}")
-    print("=" * 115 + "\n")
+    print("=" * 125 + "\n")
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Grid Search Paralelo da Heurística da Queimada no Traveling Thief Problem (TTP)"
+        description="Avaliação e Grid Search Estrutural da Heurística da Queimada no Traveling Thief Problem (TTP)"
     )
     parser.add_argument(
         "--espaco",
-        choices=["completo", "padrao", "rapido"],
+        choices=["completo", "direcionado", "padrao", "rapido"],
         default="completo",
-        help="Espaço de configurações: 'completo' (2.880 únicas), 'padrao' (288), ou 'rapido' (sem 2-opt/Drop&Add pesado).",
+        help="Espaço de configurações: 'completo' (unificado com métodos direcionados), 'direcionado' (apenas backward/forward direcionadas), 'padrao' (288), ou 'rapido' (sem 2-opt/Drop&Add).",
     )
     parser.add_argument(
         "--instancias",
-        default="leves",
-        help="Instâncias: 'leves' (31 instâncias de até 100 cidades), 'sinteticas' (7 cenários .txt), 'todas' (34 arquivos), ou arquivos específicos.",
+        default="equilibradas",
+        help="Instâncias: 'equilibradas'/'todas' (34 instâncias da bateria), 'leves' (sem as instâncias gigantes a280), 'sinteticas' (7 cenários .txt), ou arquivos específicos.",
     )
     parser.add_argument(
         "--ignorar-a280-pesada",
@@ -611,10 +727,8 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
-    # Se --instancias contiver múltiplos arquivos separados por espaço
     inst_lista = None
-    if args.instancias not in ("leves", "sinteticas", "todas"):
-        # Pode ser arquivo específico ou lista
+    if args.instancias not in ("leves", "sinteticas", "todas", "equilibradas"):
         partes = args.instancias.split()
         if len(partes) > 1 or (len(partes) == 1 and ("." in partes[0] or "*" in partes[0])):
             inst_lista = partes

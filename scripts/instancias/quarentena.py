@@ -185,7 +185,7 @@ def main():
     parser.add_argument(
         "--csv",
         type=str,
-        default=str(_raiz / "results" / "bateria_solucoes_detalhada.csv"),
+        default=str(_raiz / "results" / "todos" / "completo.csv" if (_raiz / "results" / "todos" / "completo.csv").exists() else _raiz / "results" / "bateria_solucoes_detalhada.csv"),
         help="Caminho do CSV detalhado de execuções.",
     )
     parser.add_argument(

@@ -73,6 +73,8 @@ def sample_instance():
     "queimada_reversa", "queimada_refinada", "queimada_reversa_refinada", "queimada_legacy",
     "queimada_com_2opt", "queimada_sem_2opt", "queimada_com_afinidade", "queimada_sem_afinidade",
     "queimada_regime_r", "queimada_ttp2", "queimada_backward_arestas", "queimada_backward_sem_2opt",
+    "queimada_backward_direcionada", "queimada_backward_direcionada_buracos", "queimada_backward_direcionada_sem_2opt_buracos",
+    "queimada_forward_direcionada", "queimada_forward_direcionada_buracos", "queimada_forward_direcionada_sem_2opt_buracos",
     "pack_iterative", "cosolver",
     "s2_heuristic", "s2_refinada", "s5_heuristic", "s5_refinada"
 ])
@@ -143,3 +145,23 @@ def test_queimada_otimizar_buracos(sample_instance):
     assert "queimada_backward_sem_2opt_buracos" in SolverRegistry.listar()
 
 
+def test_queimada_directed_variations(sample_instance):
+    for solver_name in [
+        "queimada_backward_direcionada",
+        "queimada_backward_direcionada_buracos",
+        "queimada_backward_direcionada_sem_2opt_buracos",
+        "queimada_forward_direcionada",
+        "queimada_forward_direcionada_buracos",
+        "queimada_forward_direcionada_sem_2opt_buracos",
+    ]:
+        solver = SolverRegistry.get(solver_name)
+        sol = solver.solve(sample_instance)
+        assert len(sol.rota) == 4
+        assert sol.rota[0] == 1
+        assert set(sol.rota) == {1, 2, 3, 4}
+        peso_total = sum(
+            sample_instance.itens[it_id - 1].peso
+            for it_ids in sol.plano_coleta.values()
+            for it_id in it_ids
+        )
+        assert peso_total <= sample_instance.capacidade_mochila

@@ -119,9 +119,9 @@ def _obter_metadados_tamanho(arq: Path) -> Tuple[int, int, int]:
     dim = 0
     itens = 0
     try:
-        with open(arq, "r", encoding="utf-8", errors="ignore") as fp:
-            for _ in range(40):
-                line = fp.readline()
+        with open(arq, "r", encoding="utf-8", errors="ignore") as f:
+            for _ in range(25):
+                line = f.readline()
                 if not line:
                     break
                 line_u = line.upper()
@@ -148,7 +148,8 @@ class BatchRunner:
     """
     Executor de baterias de testes em lote para o Traveling Thief Problem.
     Suporta multiprocessamento paralelo, carregamento assíncrono de .ttp e .txt,
-    recuperação automática de progresso (resume) e salvamento incremental no CSV.
+    recuperação automática de progresso (resume), histórico configurável
+    e salvamento incremental no CSV.
     """
 
     def __init__(
@@ -162,16 +163,20 @@ class BatchRunner:
         workers: Optional[int] = None,
         resume: bool = True,
         output_stats_csv: Optional[str] = None,
+        history_csv: Optional[str] = None,
+        importar_historico: bool = True,
     ):
         self.test_dir = Path(test_dir)
         self.solvers = solvers
         self.models = models or ["TTP1"]
         self.runs = runs
-        self.output_csv = output_csv
-        self.output_stats_csv = output_stats_csv or str(Path(output_csv).parent / "comparativo_estatisticas_ttp1_ttp2.csv")
+        self.output_csv = str(Path(output_csv).resolve())
+        self.output_stats_csv = output_stats_csv
         self.base_seed = base_seed
         self.workers = workers if workers is not None else min(os.cpu_count() or 4, 8)
         self.resume = resume
+        self.history_csv = str(Path(history_csv).resolve()) if history_csv else None
+        self.importar_historico = importar_historico
         self.logger = CSVLogger(self.output_csv)
 
     def _obter_arquivos_instancias(self) -> List[Path]:
@@ -205,6 +210,53 @@ class BatchRunner:
         arquivos_unicos.sort(key=lambda a: (_obter_metadados_tamanho(a), a.name))
         return arquivos_unicos
 
+    def verificar_status_historico(self) -> Dict[str, Any]:
+        """
+        Audita a base de histórico em relação aos solvers e instâncias solicitados
+        sem executar simulações na CPU.
+        """
+        instance_files = self._obter_arquivos_instancias()
+        concluidas = set()
+
+        if Path(self.output_csv).is_file():
+            concluidas.update(self.logger.obter_chaves_registradas())
+
+        if self.history_csv and Path(self.history_csv).is_file():
+            logger_hist = CSVLogger(self.history_csv)
+            concluidas.update(logger_hist.obter_chaves_registradas())
+
+        total_tarefas = len(instance_files) * len(self.solvers) * len(self.models) * self.runs
+        tarefas_concluidas = 0
+        status_por_solver = {}
+
+        for s_name in self.solvers:
+            tarefas_solver = len(instance_files) * len(self.models) * self.runs
+            feitas_solver = 0
+            for inst in instance_files:
+                for mod in self.models:
+                    for run_idx in range(self.runs):
+                        seed = self.base_seed + run_idx
+                        chave = (inst.name, mod, s_name, seed)
+                        if chave in concluidas:
+                            tarefas_concluidas += 1
+                            feitas_solver += 1
+            pct = (feitas_solver / max(tarefas_solver, 1)) * 100.0
+            status_por_solver[s_name] = {
+                "total": tarefas_solver,
+                "feitas": feitas_solver,
+                "pendentes": tarefas_solver - feitas_solver,
+                "pct": pct,
+            }
+
+        return {
+            "total_instancias": len(instance_files),
+            "total_tarefas": total_tarefas,
+            "tarefas_concluidas": tarefas_concluidas,
+            "tarefas_pendentes": total_tarefas - tarefas_concluidas,
+            "pct_concluido": (tarefas_concluidas / max(total_tarefas, 1)) * 100.0,
+            "status_solvers": status_por_solver,
+        }
+
     def run(self):
         instance_files = self._obter_arquivos_instancias()
 
@@ -216,16 +268,54 @@ class BatchRunner:
         print(f"{'INICIANDO BATERIA DE TESTES DE SOLUCIONADORES DO TTP':^95}")
         print(f"Instâncias: {len(instance_files)} | Solvers: {len(self.solvers)} | "
               f"Modelos: {len(self.models)} | Runs: {self.runs} | Workers: {self.workers}")
+        print(f"Destino de saída: {self.output_csv}")
         print(f"{'='*95}\n")
 
-        # Verifica execuções já salvas no CSV se resume ativado
+        # Verifica execuções já salvas no output_csv e no history_csv
         concluidas: Set[Tuple[str, str, str, int]] = set()
+        historico_chaves: Set[Tuple[str, str, str, int]] = set()
+
         if self.resume:
             concluidas = self.logger.obter_chaves_registradas()
             if concluidas:
-                print(f"Modo Resume ativado: {len(concluidas)} execuções já gravadas encontradas no CSV.")
+                print(f"[RESUME] {len(concluidas)} execuções já gravadas encontradas no CSV de saída.")
 
-        # Constrói fila de tarefas
+        # Conecta histórico externo (se existir e for diferente do output_csv)
+        if self.history_csv and Path(self.history_csv).is_file():
+            logger_hist = CSVLogger(self.history_csv)
+            historico_chaves = logger_hist.obter_chaves_registradas()
+            print(f"[HISTÓRICO] Base conectada: {Path(self.history_csv).name} ({len(historico_chaves)} registros)")
+
+            # Se output_csv for diferente de history_csv, importa registros correspondentes
+            if Path(self.history_csv).resolve() != Path(self.output_csv).resolve() and self.importar_historico:
+                linhas_a_importar = []
+                try:
+                    with open(self.history_csv, "r", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            inst = row.get("arquivo_instancia", "")
+                            mod = row.get("modelo_ttp", "")
+                            solv = row.get("solucionador", "")
+                            s_str = row.get("seed", "0")
+                            try:
+                                seed = int(s_str)
+                            except ValueError:
+                                seed = 0
+                            chave = (inst, mod, solv, seed)
+                            if chave in historico_chaves and chave not in concluidas:
+                                if solv in self.solvers and mod in self.models:
+                                    linhas_a_importar.append(row)
+                                    concluidas.add(chave)
+                    if linhas_a_importar:
+                        print(f"[HISTÓRICO] {len(linhas_a_importar)} registros reaproveitados do histórico para o CSV de saída.")
+                        for r in linhas_a_importar:
+                            self.logger.registrar(r)
+                except Exception as e:
+                    print(f"[AVISO] Falha ao ler histórico: {e}")
+            else:
+                concluidas.update(historico_chaves)
+
+        # Constrói fila de tarefas pendentes
         tarefas: List[Tuple[str, str, Optional[Tuple[str, str]], str, int, int]] = []
         for instance_file in instance_files:
             for solver_name in self.solvers:
@@ -353,9 +443,6 @@ class BatchRunner:
         if not dados_por_modelo_solver:
             return
 
-        caminho_stats = Path(output_stats_csv or self.output_stats_csv)
-        caminho_stats.parent.mkdir(parents=True, exist_ok=True)
-
         modelos = sorted(list({k[0] for k in dados_por_modelo_solver.keys()}))
         estatisticas_consolidadas = []
 
@@ -411,31 +498,33 @@ class BatchRunner:
 
             print(f"{'='*115}")
 
-        # Salva o arquivo CSV consolidado de estatísticas
-        with open(caminho_stats, "w", newline="", encoding="utf-8") as f:
-            colunas = [
-                "modelo", "solver", "media_G", "std_G", "min_G", "q1_G", "mediana_G", "q3_G", "max_G",
-                "media_tempo_cpu_ms", "media_tempo_viagem", "media_peso_acumulado",
-                "media_pct_ocupacao_mochila", "media_qtd_itens"
-            ]
-            writer = csv.DictWriter(f, fieldnames=colunas, delimiter=";")
-            writer.writeheader()
-            for st in estatisticas_consolidadas:
-                writer.writerow({
-                    "modelo": st["modelo"],
-                    "solver": st["solver"],
-                    "media_G": f"{st['media_G']:.4f}",
-                    "std_G": f"{st['std_G']:.4f}",
-                    "min_G": f"{st['min_G']:.4f}",
-                    "q1_G": f"{st['q1_G']:.4f}",
-                    "mediana_G": f"{st['mediana_G']:.4f}",
-                    "q3_G": f"{st['q3_G']:.4f}",
-                    "max_G": f"{st['max_G']:.4f}",
-                    "media_tempo_cpu_ms": f"{st['media_tempo_cpu_ms']:.2f}",
-                    "media_tempo_viagem": f"{st['media_tempo_viagem']:.4f}",
-                    "media_peso_acumulado": f"{st['media_peso_acumulado']:.4f}",
-                    "media_pct_ocupacao_mochila": f"{st['media_pct_ocupacao_mochila']:.2f}",
-                    "media_qtd_itens": f"{st['media_qtd_itens']:.2f}",
-                })
-
-        print(f"\nRelatório estatístico consolidado salvo com sucesso em:\n  - {caminho_stats}\n")
+        destino_stats = output_stats_csv or self.output_stats_csv
+        if destino_stats:
+            caminho_stats = Path(destino_stats)
+            caminho_stats.parent.mkdir(parents=True, exist_ok=True)
+            with open(caminho_stats, "w", newline="", encoding="utf-8") as f:
+                colunas = [
+                    "modelo", "solver", "media_G", "std_G", "min_G", "q1_G", "mediana_G", "q3_G", "max_G",
+                    "media_tempo_cpu_ms", "media_tempo_viagem", "media_peso_acumulado",
+                    "media_pct_ocupacao_mochila", "media_qtd_itens"
+                ]
+                writer = csv.DictWriter(f, fieldnames=colunas, delimiter=";")
+                writer.writeheader()
+                for st in estatisticas_consolidadas:
+                    writer.writerow({
+                        "modelo": st["modelo"],
+                        "solver": st["solver"],
+                        "media_G": f"{st['media_G']:.4f}",
+                        "std_G": f"{st['std_G']:.4f}",
+                        "min_G": f"{st['min_G']:.4f}",
+                        "q1_G": f"{st['q1_G']:.4f}",
+                        "mediana_G": f"{st['mediana_G']:.4f}",
+                        "q3_G": f"{st['q3_G']:.4f}",
+                        "max_G": f"{st['max_G']:.4f}",
+                        "media_tempo_cpu_ms": f"{st['media_tempo_cpu_ms']:.2f}",
+                        "media_tempo_viagem": f"{st['media_tempo_viagem']:.4f}",
+                        "media_peso_acumulado": f"{st['media_peso_acumulado']:.4f}",
+                        "media_pct_ocupacao_mochila": f"{st['media_pct_ocupacao_mochila']:.2f}",
+                        "media_qtd_itens": f"{st['media_qtd_itens']:.2f}",
+                    })
+            print(f"\nRelatório estatístico consolidado salvo com sucesso em:\n  - {caminho_stats}\n")

@@ -287,9 +287,9 @@ def executar_bateria_lucrativa(
     pasta_resultados = _raiz / "results"
     pasta_resultados.mkdir(parents=True, exist_ok=True)
 
-    csv_detalhado = output_solucoes or str(pasta_resultados / "bateria_lucrativas_detalhada.csv")
-    csv_estatisticas = output_stats or str(pasta_resultados / "comparativo_estatisticas_lucrativas.csv")
-    csv_filtro = output_filtro or str(pasta_resultados / "filtro_instancias_lucrativas.csv")
+    csv_detalhado = output_solucoes or str(pasta_resultados / "todos" / "lucrativas.csv")
+    csv_estatisticas = output_stats or str(None)
+    csv_filtro = output_filtro or str(pasta_resultados / "triagem" / "filtro_instancias_lucrativas.csv")
 
     modelos = modelos_lista or ["TTP1"]
 

@@ -250,48 +250,46 @@ def gerar_html_dashboard(
 ):
     _pasta_visualizador.mkdir(parents=True, exist_ok=True)
 
-    # Dataset 1: Equilibradas
-    arq_eq_bruto = _pasta_results / "comparativo_estatisticas_equilibradas.csv"
-    arq_eq_norm = _pasta_results / "comparativo_estatisticas_equilibradas_normalizadas.csv"
-    if not arq_eq_bruto.exists():
-        arq_eq_bruto = _pasta_results / "comparativo_estatisticas_ttp1_ttp2.csv"
-    if not arq_eq_norm.exists():
-        arq_eq_norm = _pasta_results / "comparativo_estatisticas_normalizadas.csv"
-
-    # Dataset 2: Todas as instâncias
-    arq_todas_bruto = _pasta_results / "comparativo_estatisticas_ttp1_ttp2.csv"
-    arq_todas_norm = _pasta_results / "comparativo_estatisticas_normalizadas.csv"
-
-    # Dataset 3: Triagem econômica
-    arq_filtro = _pasta_results / "triagem_alto_prejuizo.csv"
+    # Estrutura 3x3: Carrega cenários diretamente de results/todos/{equilibradas,completo,lucrativas}.csv
+    arq_eq = _pasta_results / "todos" / "equilibradas.csv"
+    arq_todas = _pasta_results / "todos" / "completo.csv"
+    arq_luc = _pasta_results / "todos" / "lucrativas.csv"
+    arq_filtro = _pasta_results / "triagem" / "triagem_alto_prejuizo.csv"
     if not arq_filtro.exists():
-        arq_filtro = _pasta_results / "filtro_instancias_lucrativas.csv"
+        arq_filtro = _pasta_results / "triagem" / "filtro_instancias_lucrativas.csv"
 
-    if csv_bruto_path:
-        arq_eq_bruto = Path(csv_bruto_path)
-    if csv_norm_path:
-        arq_eq_norm = Path(csv_norm_path)
     if csv_filtro_path:
         arq_filtro = Path(csv_filtro_path)
 
-    dados_eq_bruto = ler_csv_linhas(arq_eq_bruto)
-    dados_eq_norm = ler_csv_linhas(arq_eq_norm)
-    dados_todas_bruto = ler_csv_linhas(arq_todas_bruto)
-    dados_todas_norm = ler_csv_linhas(arq_todas_norm)
+    _, n_eq, dados_eq_bruto, dados_eq_norm = processar_qualquer_csv_para_dataset(arq_eq)
+    _, n_todas, dados_todas_bruto, dados_todas_norm = processar_qualquer_csv_para_dataset(arq_todas)
+    _, n_luc, dados_luc_bruto, dados_luc_norm = processar_qualquer_csv_para_dataset(arq_luc)
+
+    if csv_bruto_path:
+        dados_eq_bruto = ler_csv_linhas(Path(csv_bruto_path))
+    if csv_norm_path:
+        dados_eq_norm = ler_csv_linhas(Path(csv_norm_path))
+
     dados_filtro = ler_csv_linhas(arq_filtro)
 
     datasets_dict: Dict[str, Any] = {
         "equilibradas": {
-            "nome": "Instâncias Equilibradas (Receita/Custo ≥ 0.5) - 34 instâncias",
-            "instancias": 34,
+            "nome": f"Instâncias Equilibradas (Receita/Custo ≥ 0.5) - {n_eq or 34} instâncias",
+            "instancias": n_eq or 34,
             "brutos": dados_eq_bruto,
             "norm": dados_eq_norm,
         },
         "todas": {
-            "nome": "Todas as Instâncias da Bateria (550 instâncias)",
-            "instancias": 550,
+            "nome": f"Todas as Instâncias da Bateria ({n_todas or 550} instâncias)",
+            "instancias": n_todas or 550,
             "brutos": dados_todas_bruto,
             "norm": dados_todas_norm,
+        },
+        "lucrativas": {
+            "nome": f"Instâncias Lucrativas (UB > 0) - {n_luc or 23} instâncias",
+            "instancias": n_luc or 23,
+            "brutos": dados_luc_bruto,
+            "norm": dados_luc_norm,
         },
     }
 

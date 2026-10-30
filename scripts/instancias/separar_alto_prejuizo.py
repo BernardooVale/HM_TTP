@@ -415,31 +415,31 @@ def main():
     parser.add_argument(
         "--csv-total",
         type=str,
-        default=str(_raiz / "results" / "bateria_solucoes_detalhada.csv"),
+        default=str((_raiz / "results" / "todos" / "completo.csv") if (_raiz / "results" / "todos" / "completo.csv").exists() else (_raiz / "results" / "bateria_solucoes_detalhada.csv")),
         help="CSV com todos os dados detalhados da bateria executada",
     )
     parser.add_argument(
         "--output-detalhado",
         type=str,
-        default=str(_raiz / "results" / "bateria_equilibradas_detalhada.csv"),
+        default=str((_raiz / "results" / "todos" / "equilibradas.csv") if (_raiz / "results" / "todos" / "equilibradas.csv").exists() else (_raiz / "results" / "bateria_equilibradas_detalhada.csv")),
         help="Caminho do CSV de soluções detalhadas das instâncias equilibradas",
     )
     parser.add_argument(
         "--output-stats",
         type=str,
-        default=str(_raiz / "results" / "comparativo_estatisticas_equilibradas.csv"),
+        default=str((_raiz / "results" / "cenarios" / "equilibradas" / "comparativo_estatisticas_equilibradas.csv") if (_raiz / "results" / "cenarios" / "equilibradas" / "comparativo_estatisticas_equilibradas.csv").exists() else (_raiz / "results" / "comparativo_estatisticas_equilibradas.csv")),
         help="Caminho do CSV estatístico consolidado das instâncias equilibradas",
     )
     parser.add_argument(
         "--output-norm",
         type=str,
-        default=str(_raiz / "results" / "comparativo_estatisticas_equilibradas_normalizadas.csv"),
+        default=str((_raiz / "results" / "cenarios" / "equilibradas" / "comparativo_estatisticas_equilibradas_normalizadas.csv") if (_raiz / "results" / "cenarios" / "equilibradas" / "comparativo_estatisticas_equilibradas_normalizadas.csv").exists() else (_raiz / "results" / "comparativo_estatisticas_equilibradas_normalizadas.csv")),
         help="Caminho do CSV normalizado das instâncias equilibradas",
     )
     parser.add_argument(
         "--output-triagem",
         type=str,
-        default=str(_raiz / "results" / "triagem_alto_prejuizo.csv"),
+        default=str((_raiz / "results" / "triagem" / "triagem_alto_prejuizo.csv") if (_raiz / "results" / "triagem" / "triagem_alto_prejuizo.csv").exists() else (_raiz / "results" / "triagem_alto_prejuizo.csv")),
         help="Caminho do CSV de triagem econômica de todas as instâncias",
     )
     parser.add_argument(

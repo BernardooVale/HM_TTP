@@ -176,13 +176,13 @@ def main():
     parser.add_argument(
         "--input",
         type=str,
-        default=str(_raiz / "results" / "comparativo_estatisticas_ttp1_ttp2.csv"),
+        default=str(_raiz / "results" / "web" / "comparativo_estatisticas_ttp1_ttp2.csv" if (_raiz / "results" / "web" / "comparativo_estatisticas_ttp1_ttp2.csv").exists() else _raiz / "results" / "comparativo_estatisticas_ttp1_ttp2.csv"),
         help="Caminho do CSV de estatísticas consolidado original.",
     )
     parser.add_argument(
         "--output",
         type=str,
-        default=str(_raiz / "results" / "comparativo_estatisticas_normalizadas.csv"),
+        default=str(_raiz / "results" / "web" / "comparativo_estatisticas_normalizadas.csv" if (_raiz / "results" / "web" / "comparativo_estatisticas_normalizadas.csv").exists() else _raiz / "results" / "comparativo_estatisticas_normalizadas.csv"),
         help="Caminho do CSV de saída com dados normalizados.",
     )
 

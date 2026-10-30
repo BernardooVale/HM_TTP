@@ -1,48 +1,38 @@
-# 📊 Resultados Experimentais do TTP (Travelling Thief Problem)
+# 📊 Resultados Experimentais do TTP (Traveling Thief Problem)
 
-Este diretório centraliza todos os dados brutos, relatórios detalhados e tabelas estatísticas geradas pelo framework.
-
----
-
-## 📑 Índice dos Arquivos de Resultados
-
-### 1. Bateria Global (Todas as 550 Instâncias)
-| Arquivo | Descrição |
-| :--- | :--- |
-| `bateria_solucoes_detalhada.csv` | Registro de cada execução individual (instância × solver × modelo × seed). |
-| `comparativo_estatisticas_ttp1_ttp2.csv` | Consolidação estatística com Média, Desvio Padrão, Quartis (Q1, Mediana, Q3), Mín, Máx e Tempo de CPU. |
-| `comparativo_estatisticas_normalizadas.csv` | Desempenho relativo normalizado no intervalo $[0, 1]$ (o melhor solver recebe 1.0000). |
-| `bateria_completa.csv` | Registro de execuções das instâncias sintéticas preliminares. |
-| `comparativo_heuristicas.csv` | Comparativo resumido de execuções preliminares. |
-
-### 2. Instâncias Equilibradas (Recomendado para Benchmarking Científico)
-Subconjunto selecionado com base no critério econômico $\text{Razão} = \frac{\text{Receita Potencial Mochila}}{\text{Custo Mínimo Aluguel MST}} \ge 0.5$, onde o problema não degenera em TSP puro:
-| Arquivo | Descrição |
-| :--- | :--- |
-| `bateria_equilibradas_detalhada.csv` | Execuções detalhadas apenas nas instâncias equilibradas. |
-| `comparativo_estatisticas_equilibradas.csv` | Estatísticas consolidadas das instâncias equilibradas. |
-| `comparativo_estatisticas_equilibradas_normalizadas.csv` | Scores normalizados $[0, 1]$ para análise justa de pódios. |
-
-### 3. Triagem Econômica e Diagnóstico de Lucro
-| Arquivo | Descrição |
-| :--- | :--- |
-| `triagem_alto_prejuizo.csv` | Diagnóstico de todas as 550 instâncias classificadas como `EQUILIBRADA` ou `ALTO_PREJUIZO`. |
-| `filtro_instancias_lucrativas.csv` | Diagnóstico pelo Limitante Superior Teórico ($UB = \text{Mochila Fracionária} - R \cdot L_{\text{MST}} / v_{\max}$). |
-| `bateria_lucrativas_detalhada.csv` | Execuções detalhadas no subconjunto matematicamente lucrativo ($UB > 0$). |
-| `comparativo_estatisticas_lucrativas.csv` | Estatísticas consolidadas do subconjunto lucrativo. |
-
-### 4. Experimentos e Grid Search da Queimada
-| Arquivo | Descrição |
-| :--- | :--- |
-| `grid_search_queimada.csv` | Varredura clássica das parametrizações da Queimada em cenários de teste sintéticos. |
-| `grid_search_queimada_padrao.csv` | Espaço clássico com 288 configurações avaliadas. |
-| `grid_search_queimada_rapido.csv` | Espaço construtivo rápido (sem 2-opt e sem buscas locais pesadas). |
-| `grid_search_queimada_completo.csv` | Espaço exaustivo completo de 2.880 configurações explorando afinidade térmica, backward edges e preenchimento de buracos. |
+Este diretório centraliza todos os dados de execução do framework em uma arquitetura simétrica **$3 \times 3$** (3 famílias de solucionadores $\times$ 3 cenários de instâncias).
 
 ---
 
-## 🔍 Dicionário de Colunas Comuns (CSVs Detalhados)
-- `id_execucao`: Identificador alfanumérico único da execução.
+## 🗂️ Estrutura de Diretórios ($3 \times 3$)
+
+```text
+results/
+├── todos/                  # Todos os solucionadores (Literatura, Baselines, 37% e Queimada)
+│   ├── completo.csv        # Todas as 550+ instâncias da bateria
+│   ├── equilibradas.csv    # Subconjunto equilibrado (Receita Potencial / Custo MST ≥ 0.5)
+│   └── lucrativas.csv      # Subconjunto matematicamente lucrativo (Upper Bound > 0)
+│
+├── queimada/               # Exclusivo das variantes da Heurística da Queimada
+│   ├── completo.csv        # Histórico completo da Queimada em todas as instâncias
+│   ├── equilibradas.csv    # Desempenho da Queimada nas instâncias equilibradas
+│   ├── lucrativas.csv      # Desempenho da Queimada nas instâncias lucrativas
+│   └── grid_search/        # Avaliações combinatórias estruturais (grid_search_paralelo.py)
+│
+├── heuristica_37/          # Exclusivo das variantes da Heurística dos 37%
+│   ├── completo.csv        # Histórico completo dos 37% em todas as instâncias
+│   ├── equilibradas.csv    # Desempenho dos 37% nas instâncias equilibradas
+│   └── lucrativas.csv      # Desempenho dos 37% nas instâncias lucrativas
+│
+└── triagem/                # Diagnósticos estruturais das instâncias
+    ├── triagem_alto_prejuizo.csv       # Classificação EQUILIBRADA vs ALTO_PREJUIZO
+    └── filtro_instancias_lucrativas.csv # Avaliação do Limitante Superior Teórico (UB)
+```
+
+---
+
+## 🔍 Dicionário de Colunas (CSVs de Execução)
+- `id_execucao`: Identificador único da execução.
 - `arquivo_instancia`: Nome do arquivo de instância (ex: `instancia_01.txt`, `512.ttp`).
 - `modelo_ttp`: `TTP1` (padrão da literatura) ou `TTP2` (com decaimento temporal).
 - `solucionador`: Nome registrado do solver no `SolverRegistry`.

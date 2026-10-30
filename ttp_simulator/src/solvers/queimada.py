@@ -178,6 +178,7 @@ class QueimadaSolver(BaseSolver):
         adaptar_regime_r: Optional[bool] = None,
         modelo: str = "TTP1",
         otimizar_buracos: Optional[bool] = None,
+        grafo_direcionado: Optional[bool] = None,
         nome: Optional[str] = None,
     ):
         # Carrega dinamicamente a melhor configuração conhecida persistida
@@ -188,7 +189,7 @@ class QueimadaSolver(BaseSolver):
         - dissipacao:               'adjacent_only', 'dijkstra', 'bfs' (padrão ótimo: 'bfs')
         - direcao (ordem de calor): 'calor_final', 'calor_inicio' (padrão ótimo: 'calor_final')
         - selecao:                  'greedy_relative', 'knapsack_relative' (padrão ótimo: 'greedy_relative')
-        - metodo_construcao:        'walk', 'kruskal', 'backward_edges' (padrão ótimo: 'kruskal')
+        - metodo_construcao:        'walk', 'kruskal', 'backward_edges', 'backward_directed', 'forward_directed' (padrão ótimo: 'kruskal')
         - ordem_selecao:            'densidade', 'reversa', 'sequencial' (padrão ótimo: 'densidade')
         - refinamento:              se True, executa busca local Drop & Add no empacotamento (padrão: True)
         - refinamento_rota:         se True, executa busca local 2-opt para desatar cruzamentos da rota (padrão: True)
@@ -197,6 +198,7 @@ class QueimadaSolver(BaseSolver):
         - adaptar_regime_r:         se True, ajusta dinamicamente a afinidade ao valor de R da instância (padrão: False)
         - modelo:                   'TTP1' (aluguel de viagem) ou 'TTP2' (degradação temporal) (padrão: 'TTP1')
         - otimizar_buracos:         se True, otimiza segmentos vazios sem coleta pós-mochila via B&B / 2-opt (padrão: False)
+        - grafo_direcionado:        se True, modela calor direcionado em arcos (u, v) (padrão: True se backward_directed/forward_directed)
         """
         self.temperatura_modo = temperatura if temperatura is not None else cfg.get("temperatura", "total_value")
         self.dissipacao_modo = dissipacao if dissipacao is not None else cfg.get("dissipacao", "dijkstra")
@@ -210,6 +212,13 @@ class QueimadaSolver(BaseSolver):
         self.gamma_afinidade = gamma_afinidade if gamma_afinidade is not None else cfg.get("gamma_afinidade", 1.0)
         self.adaptar_regime_r = adaptar_regime_r if adaptar_regime_r is not None else cfg.get("adaptar_regime_r", False)
         self.otimizar_buracos = otimizar_buracos if otimizar_buracos is not None else cfg.get("otimizar_buracos", True)
+        if grafo_direcionado is not None:
+            self.grafo_direcionado = grafo_direcionado
+        else:
+            self.grafo_direcionado = cfg.get(
+                "grafo_direcionado",
+                self.metodo_construcao in ("backward_directed", "forward_directed"),
+            )
         self.modelo = modelo
         self._nome = nome or "queimada"
 
@@ -244,78 +253,136 @@ class QueimadaSolver(BaseSolver):
         self, instance: TTPInstance, temperaturas: Dict[int, float]
     ) -> Dict[Tuple[int, int], float]:
         """
-        Dissipa o calor dos vértices pelas arestas do grafo em alta performance.
-        Retorna dicionário (min(u, v), max(u, v)) -> calor acumulado na aresta.
+        Dissipa o calor dos vértices pelas arestas/arcos do grafo em alta performance.
+        - Não-direcionado: retorna (min(u, v), max(u, v)) -> calor acumulado na aresta.
+        - Direcionado: retorna (u, v) -> calor transmitido no arco direcionado u -> v.
         """
         cidades = list(instance.grafo.cidades.keys())
         n = len(cidades)
 
         calor: Dict[Tuple[int, int], float] = {}
 
-        if self.dissipacao_modo == "adjacent_only":
-            for i in range(n):
-                cidade_atual = cidades[i]
-                temperatura_cidade = temperaturas.get(cidade_atual, 0.0)
-                
-                for j in range(i + 1, n):
-                    prox_cidade = cidades[j]
-                    temperatura_prox_cidade = temperaturas.get(prox_cidade, 0.0)
-                    aresta = (cidade_atual, prox_cidade) if cidade_atual < prox_cidade else (prox_cidade, cidade_atual)
-                    
-                    if temperatura_cidade > 0.0 or temperatura_prox_cidade > 0.0:
-                        distancia = instance.grafo.distancia(cidade_atual, prox_cidade)
-                        calor[aresta] = (temperatura_cidade + temperatura_prox_cidade) / max(distancia, 0.001)
-                        
-                    else:
-                        calor[aresta] = 0.0
+        if not self.grafo_direcionado:
+            # Modo não-direcionado clássico (min(u, v), max(u, v))
+            if self.dissipacao_modo == "adjacent_only":
+                for i in range(n):
+                    cidade_atual = cidades[i]
+                    temperatura_cidade = temperaturas.get(cidade_atual, 0.0)
 
-        elif self.dissipacao_modo == "bfs":
-            # Forma fechada exata O(N^2) para grafo completo:
-            # Para cada nó s, level[s]=0 e level[v]=1 para todo v != s.
-            # h = 1 para s in {u, v} e h = 2 para s not in {u, v}.
-            T_total = sum(temperaturas.values())
-            
-            for i in range(n):
-                cidade = cidades[i]
-                temperatura_cidade = temperaturas.get(cidade, 0.0)
-                
-                for j in range(i + 1, n):
-                    prox_cidade = cidades[j]
-                    temperatura_prox_cidade = temperaturas.get(prox_cidade, 0.0)
-                    distancia = instance.grafo.distancia(cidade, prox_cidade)
-                    aresta = (cidade, prox_cidade) if cidade < prox_cidade else (prox_cidade, cidade)
-                    calor[aresta] = (temperatura_cidade + temperatura_prox_cidade + T_total) / (2.0 * (1.0 + distancia))
+                    for j in range(i + 1, n):
+                        prox_cidade = cidades[j]
+                        temperatura_prox_cidade = temperaturas.get(prox_cidade, 0.0)
+                        aresta = (cidade_atual, prox_cidade) if cidade_atual < prox_cidade else (prox_cidade, cidade_atual)
 
-        elif self.dissipacao_modo == "dijkstra":
-            for s in cidades:
-                t_s = temperaturas.get(s, 0.0)
-                if t_s <= 0.0:
-                    continue
+                        if temperatura_cidade > 0.0 or temperatura_prox_cidade > 0.0:
+                            distancia = instance.grafo.distancia(cidade_atual, prox_cidade)
+                            calor[aresta] = (temperatura_cidade + temperatura_prox_cidade) / max(distancia, 0.001)
+                        else:
+                            calor[aresta] = 0.0
 
-                dist = {c: float("inf") for c in cidades}
-                dist[s] = 0.0
-                pq = [(0.0, s)]
-                while pq:
-                    d_u, u = heapq.heappop(pq)
-                    if d_u > dist[u]:
-                        continue
-                    for v in cidades:
-                        if v == u:
-                            continue
-                        w = instance.grafo.distancia(u, v)
-                        if dist[u] + w < dist[v]:
-                            dist[v] = dist[u] + w
-                            heapq.heappush(pq, (dist[v], v))
+            elif self.dissipacao_modo == "bfs":
+                T_total = sum(temperaturas.values())
 
                 for i in range(n):
-                    u = cidades[i]
+                    cidade = cidades[i]
+                    temperatura_cidade = temperaturas.get(cidade, 0.0)
+
                     for j in range(i + 1, n):
-                        v = cidades[j]
-                        e = (u, v) if u < v else (v, u)
-                        d_edge = min(dist[u], dist[v]) + instance.grafo.distancia(u, v) / 2.0
-                        calor[e] = calor.get(e, 0.0) + t_s / (1.0 + d_edge)
+                        prox_cidade = cidades[j]
+                        temperatura_prox_cidade = temperaturas.get(prox_cidade, 0.0)
+                        distancia = instance.grafo.distancia(cidade, prox_cidade)
+                        aresta = (cidade, prox_cidade) if cidade < prox_cidade else (prox_cidade, cidade)
+                        calor[aresta] = (temperatura_cidade + temperatura_prox_cidade + T_total) / (2.0 * (1.0 + distancia))
+
+            elif self.dissipacao_modo == "dijkstra":
+                for s in cidades:
+                    t_s = temperaturas.get(s, 0.0)
+                    if t_s <= 0.0:
+                        continue
+
+                    dist = {c: float("inf") for c in cidades}
+                    dist[s] = 0.0
+                    pq = [(0.0, s)]
+                    while pq:
+                        d_u, u = heapq.heappop(pq)
+                        if d_u > dist[u]:
+                            continue
+                        for v in cidades:
+                            if v == u:
+                                continue
+                            w = instance.grafo.distancia(u, v)
+                            if dist[u] + w < dist[v]:
+                                dist[v] = dist[u] + w
+                                heapq.heappush(pq, (dist[v], v))
+
+                    for i in range(n):
+                        u = cidades[i]
+                        for j in range(i + 1, n):
+                            v = cidades[j]
+                            e = (u, v) if u < v else (v, u)
+                            d_edge = min(dist[u], dist[v]) + instance.grafo.distancia(u, v) / 2.0
+                            calor[e] = calor.get(e, 0.0) + t_s / (1.0 + d_edge)
+            else:
+                raise ValueError(f"Modo de dissipação inválido: {self.dissipacao_modo}")
+
         else:
-            raise ValueError(f"Modo de dissipação inválido: {self.dissipacao_modo}")
+            # Modo direcionado: arcos ordenados (origem, destino) com u != v
+            if self.dissipacao_modo == "adjacent_only":
+                for u in cidades:
+                    t_u = temperaturas.get(u, 0.0)
+                    for v in cidades:
+                        if u == v:
+                            continue
+                        if t_u > 0.0:
+                            distancia = instance.grafo.distancia(u, v)
+                            calor[(u, v)] = t_u / max(distancia, 0.001)
+                        else:
+                            calor[(u, v)] = 0.0
+
+            elif self.dissipacao_modo == "bfs":
+                T_total = sum(temperaturas.values())
+                n_outros = max(n - 2, 1)
+                for u in cidades:
+                    t_u = temperaturas.get(u, 0.0)
+                    for v in cidades:
+                        if u == v:
+                            continue
+                        t_v = temperaturas.get(v, 0.0)
+                        # Calor de u somado ao calor das outras fontes s, excluindo expressamente o destino v
+                        outras_fontes = max(T_total - t_u - t_v, 0.0)
+                        distancia = instance.grafo.distancia(u, v)
+                        calor[(u, v)] = (t_u + outras_fontes / n_outros) / (2.0 * (1.0 + distancia))
+
+            elif self.dissipacao_modo == "dijkstra":
+                for s in cidades:
+                    t_s = temperaturas.get(s, 0.0)
+                    if t_s <= 0.0:
+                        continue
+
+                    dist = {c: float("inf") for c in cidades}
+                    dist[s] = 0.0
+                    pq = [(0.0, s)]
+                    while pq:
+                        d_u, u = heapq.heappop(pq)
+                        if d_u > dist[u]:
+                            continue
+                        for v in cidades:
+                            if v == u:
+                                continue
+                            w = instance.grafo.distancia(u, v)
+                            if dist[u] + w < dist[v]:
+                                dist[v] = dist[u] + w
+                                heapq.heappush(pq, (dist[v], v))
+
+                    for u in cidades:
+                        for v in cidades:
+                            if u == v or s == v:
+                                # Exclui o próprio destino v como fonte de calor para o arco u -> v
+                                continue
+                            d_edge = dist[u] + instance.grafo.distancia(u, v) / 2.0
+                            calor[(u, v)] = calor.get((u, v), 0.0) + t_s / (1.0 + d_edge)
+            else:
+                raise ValueError(f"Modo de dissipação inválido: {self.dissipacao_modo}")
 
         return calor
 
@@ -325,7 +392,7 @@ class QueimadaSolver(BaseSolver):
         calor: Dict[Tuple[int, int], float],
         temperaturas: Dict[int, float],
     ) -> List[int]:
-        """Constrói a rota iniciando na cidade 1 a partir do calor das arestas."""
+        """Constrói a rota iniciando na cidade 1 a partir do calor das arestas/arcos."""
         cidades = list(instance.grafo.cidades.keys())
         n = len(cidades)
         if n <= 2:
@@ -409,6 +476,7 @@ class QueimadaSolver(BaseSolver):
                 rota.append(prox)
                 ant = atual
                 atual = prox
+
         elif self.metodo_construcao == "backward_edges":
             # Construção regressiva de trás para frente a partir da Cidade 1
             # Prioriza encadear as arestas de maior calor relativo/afinidade na cauda do percurso.
@@ -438,6 +506,62 @@ class QueimadaSolver(BaseSolver):
 
             # Rota direta: as arestas adicionadas primeiro na cadeia reversa ficam no final da rota!
             rota = [1] + list(reversed(cadeia_reversa[1:]))
+
+        elif self.metodo_construcao == "backward_directed":
+            # Construção regressiva com arcos direcionados de entrada: cand -> atual
+            gamma = self.gamma_afinidade
+            if self.adaptar_regime_r and self.modelo == "TTP1":
+                gamma = min(2.5, max(0.5, 0.5 + instance.taxa_aluguel / 2.0))
+
+            def score_arco_backward(cand: int, target: int) -> float:
+                c_val = calor.get((cand, target), 0.0)
+                d_val = max(instance.grafo.distancia(cand, target), 0.001)
+                if self.afinidade_termica:
+                    return (c_val + 1e-6) / (d_val ** gamma)
+                return c_val + (1e-6 / d_val)
+
+            nao_visitadas = set(cidades)
+            nao_visitadas.remove(1)
+
+            cadeia_reversa = [1]
+            atual = 1
+
+            while nao_visitadas:
+                prox = max(nao_visitadas, key=lambda cand: score_arco_backward(cand, atual))
+                cadeia_reversa.append(prox)
+                nao_visitadas.remove(prox)
+                atual = prox
+
+            # Inverte para que os arcos de maior calor de entrada fiquem no final da viagem:
+            rota = [1] + list(reversed(cadeia_reversa[1:]))
+
+        elif self.metodo_construcao == "forward_directed":
+            # Construção progressiva a partir da Cidade 1 com arcos direcionados de saída: atual -> cand
+            # Prioriza arcos mais frios no início da viagem
+            gamma = self.gamma_afinidade
+            if self.adaptar_regime_r and self.modelo == "TTP1":
+                gamma = min(2.5, max(0.5, 0.5 + instance.taxa_aluguel / 2.0))
+
+            def score_arco_forward(orig: int, cand: int) -> float:
+                c_val = calor.get((orig, cand), 0.0)
+                d_val = max(instance.grafo.distancia(orig, cand), 0.001)
+                if self.afinidade_termica:
+                    # Menor calor tem prioridade; empate em frias desempata por menor distância
+                    return (c_val * (d_val ** gamma)) + (1e-6 * d_val)
+                return c_val + (1e-6 * d_val)
+
+            nao_visitadas = set(cidades)
+            nao_visitadas.remove(1)
+
+            rota = [1]
+            atual = 1
+
+            while nao_visitadas:
+                prox = min(nao_visitadas, key=lambda cand: score_arco_forward(atual, cand))
+                rota.append(prox)
+                nao_visitadas.remove(prox)
+                atual = prox
+
         else:
             raise ValueError(f"Método de construção inválido: {self.metodo_construcao}")
 
@@ -448,18 +572,28 @@ class QueimadaSolver(BaseSolver):
         # Duas orientações do ciclo (horário e anti-horário)
         rota_rev = [1] + list(reversed(rota[1:]))
 
-        if self.metodo_construcao == "backward_edges":
-            # Para backward_edges, avalia a concentração de calor nas ARESTAS
-            score_rota = sum(
-                calor.get((min(rota[i], rota[(i + 1) % n]), max(rota[i], rota[(i + 1) % n])), 0.0) * i
-                for i in range(n)
-            )
-            score_rev = sum(
-                calor.get((min(rota_rev[i], rota_rev[(i + 1) % n]), max(rota_rev[i], rota_rev[(i + 1) % n])), 0.0) * i
-                for i in range(n)
-            )
+        if self.metodo_construcao in ("backward_edges", "backward_directed", "forward_directed"):
+            # Para métodos de arestas/arcos, avalia a concentração de calor ao longo da viagem
+            if self.grafo_direcionado:
+                score_rota = sum(
+                    calor.get((rota[i], rota[(i + 1) % n]), 0.0) * i
+                    for i in range(n)
+                )
+                score_rev = sum(
+                    calor.get((rota_rev[i], rota_rev[(i + 1) % n]), 0.0) * i
+                    for i in range(n)
+                )
+            else:
+                score_rota = sum(
+                    calor.get((min(rota[i], rota[(i + 1) % n]), max(rota[i], rota[(i + 1) % n])), 0.0) * i
+                    for i in range(n)
+                )
+                score_rev = sum(
+                    calor.get((min(rota_rev[i], rota_rev[(i + 1) % n]), max(rota_rev[i], rota_rev[(i + 1) % n])), 0.0) * i
+                    for i in range(n)
+                )
         else:
-            # Avalia a concentração de calor ao longo da rota
+            # Avalia a concentração de calor nos vértices ao longo da rota
             score_rota = sum(i * temperaturas.get(rota[i], 0.0) for i in range(n))
             score_rev = sum(i * temperaturas.get(rota_rev[i], 0.0) for i in range(n))
 
@@ -816,19 +950,123 @@ SolverRegistry.register(
     )
 )
 
-SolverRegistry.register(
-    type(
-        "QueimadaKruskalPadraoSolver",
-        (QueimadaSolver,),
-        {
-            "nome": "queimada_kruskal_padrao",
-            "__init__": lambda self: QueimadaSolver.__init__(
-                self,
-                metodo_construcao="kruskal",
-                dissipacao="bfs",
-                otimizar_buracos=False,
-                nome="queimada_kruskal_padrao",
-            ),
-        },
-    )
-)
+SolverRegistry.register(
+    type(
+        "QueimadaKruskalPadraoSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_kruskal_padrao",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                metodo_construcao="kruskal",
+                dissipacao="bfs",
+                otimizar_buracos=False,
+                nome="queimada_kruskal_padrao",
+            ),
+        },
+    )
+)
+
+# Variações com Grafo Direcionado (elimina reflexão de auto-calor)
+SolverRegistry.register(
+    type(
+        "QueimadaBackwardDirecionadaSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_backward_direcionada",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                metodo_construcao="backward_directed",
+                grafo_direcionado=True,
+                refinamento_rota=True,
+                otimizar_buracos=False,
+                nome="queimada_backward_direcionada",
+            ),
+        },
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaBackwardDirecionadaBuracosSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_backward_direcionada_buracos",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                metodo_construcao="backward_directed",
+                grafo_direcionado=True,
+                refinamento_rota=True,
+                otimizar_buracos=True,
+                nome="queimada_backward_direcionada_buracos",
+            ),
+        },
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaBackwardDirecionadaSem2optBuracosSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_backward_direcionada_sem_2opt_buracos",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                metodo_construcao="backward_directed",
+                grafo_direcionado=True,
+                refinamento_rota=False,
+                otimizar_buracos=True,
+                nome="queimada_backward_direcionada_sem_2opt_buracos",
+            ),
+        },
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaForwardDirecionadaSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_forward_direcionada",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                metodo_construcao="forward_directed",
+                grafo_direcionado=True,
+                refinamento_rota=True,
+                otimizar_buracos=False,
+                nome="queimada_forward_direcionada",
+            ),
+        },
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaForwardDirecionadaBuracosSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_forward_direcionada_buracos",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                metodo_construcao="forward_directed",
+                grafo_direcionado=True,
+                refinamento_rota=True,
+                otimizar_buracos=True,
+                nome="queimada_forward_direcionada_buracos",
+            ),
+        },
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaForwardDirecionadaSem2optBuracosSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_forward_direcionada_sem_2opt_buracos",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                metodo_construcao="forward_directed",
+                grafo_direcionado=True,
+                refinamento_rota=False,
+                otimizar_buracos=True,
+                nome="queimada_forward_direcionada_sem_2opt_buracos",
+            ),
+        },
+    )
+)

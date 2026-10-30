@@ -102,7 +102,7 @@ def executar_bateria(
         instance_files = sorted(list(test_dir.glob(pattern)))
     else:
         # Padrão: inclui arquivos .txt de teste
-        instance_files = sorted(list(test_dir.glob("*.txt")))
+        instance_files = sorted(list(test_dir.glob("*.txt")) + list(test_dir.glob("*.ttp")))
 
     solvers_para_testar = solvers_list or [
         # Baselines
@@ -127,6 +127,14 @@ def executar_bateria(
         "queimada_backward_buracos",
         "queimada_backward_sem_2opt",
         "queimada_backward_sem_2opt_buracos",
+        # Queimada - Variações Direcionadas
+        "queimada_kruskal_padrao",
+        "queimada_backward_direcionada",
+        "queimada_backward_direcionada_buracos",
+        "queimada_backward_direcionada_sem_2opt_buracos",
+        "queimada_forward_direcionada",
+        "queimada_forward_direcionada_buracos",
+        "queimada_forward_direcionada_sem_2opt_buracos",
         # Estado da Arte da Literatura
         "s2_heuristic",
         "s5_heuristic",
@@ -198,7 +206,7 @@ def executar_bateria(
 
         # Salva CSV detalhado específico do modelo
         for modelo in modelos:
-            csv_file_detalhe = results_dir / f"comparativo_detalhado_{modelo.lower()}.csv"
+            csv_file_detalhe = results_dir / "queimada" / f"comparativo_detalhado_{modelo.lower()}.csv"
             with open(csv_file_detalhe, "w", encoding="utf-8") as f:
                 f.write("instancia;modelo;solver;lucro_liquido_G;tempo_viagem_f;peso_acumulado;qtd_itens;tempo_exec_ms\n")
                 for row in dados_detalhados[modelo]:
@@ -260,7 +268,7 @@ def executar_bateria(
             })
 
     # Grava CSV consolidado geral
-    csv_consolidado = results_dir / "comparativo_heuristicas.csv"
+    csv_consolidado = results_dir / "queimada" / "comparativo_heuristicas.csv"
     with open(csv_consolidado, "w", encoding="utf-8") as f:
         headers = [
             "modelo_ttp", "solucionador", "media_G", "std_G", "min_G", "q1_G",
