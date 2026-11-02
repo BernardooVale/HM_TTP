@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 
-@dataclass
+@dataclass(frozen=True)
 class Item:
     id: int
     peso: float  # weight w_k
