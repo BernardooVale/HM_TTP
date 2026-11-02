@@ -87,6 +87,17 @@ class IGP:
             best_beta,
         )
 
+    @staticmethod
+    def parse_solution(
+        best_packed_items: List[Item],
+    ):
+        pack_dict = {}
+        for item in best_packed_items:
+            if item.cidade_origem not in pack_dict:
+                pack_dict[item.cidade_origem] = []
+            pack_dict[item.cidade_origem].append(item.id)
+        return pack_dict
+
     def solve(
         self,
         theta: float = 5,
@@ -130,5 +141,5 @@ class IGP:
                 best_weight=best_weight,
             )
             theta -= 0.75
-
-        return best_packed_items
+        best_pack_dict = self.parse_solution(best_packed_items)
+        return best_pack_dict
