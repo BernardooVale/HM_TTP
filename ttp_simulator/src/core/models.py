@@ -430,6 +430,7 @@ class Tour:
             self.cost += delta_cost
             return delta_cost
 
+    # Pode ser otimizado para evitar recalcular distâncias já conhecidas
     def end_distance(self, start_node, grafo: Grafo):
         pos_start = self.pos[start_node]
         if pos_start == self.length - 1:
