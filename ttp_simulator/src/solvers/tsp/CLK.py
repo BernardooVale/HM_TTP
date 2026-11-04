@@ -13,12 +13,7 @@ from src.core.models import Grafo, Tour
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class LKLocalSearch:
     grafo: Grafo
-    tour: Tour
     num_tries: int = 5
-
-    def __post_init__(self):
-        self.best_cost = self.tour.cost
-        self.solutions = set()
 
     def update_best_cost(self, new_cost: float):
         self.best_cost = min(self.best_cost, new_cost)
@@ -262,9 +257,11 @@ class LKLocalSearch:
 
         return False
 
-    def solve(self):
-        better = True
+    def solve(self, tour: Tour):
+        self.tour = deepcopy(tour)
         self.solutions = set()
+
+        better = True
 
         while better:
             better = self.lin_kernighan()

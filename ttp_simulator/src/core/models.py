@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 
-@dataclass
+@dataclass(frozen=True)
 class Item:
     id: int
     peso: float  # weight w_k
@@ -27,11 +27,15 @@ class Cidade:
 class Grafo:
     cidades: dict[int, Cidade]  # city_id -> Cidade
     edge_weight_type: str  # 'EUC_2D' or 'EXPLICIT'
-    distancias: dict[tuple[int, int], float] = field(default_factory=dict)  # explicit distances
+    distancias: dict[tuple[int, int], float] = field(
+        default_factory=dict
+    )  # explicit distances
     _x: list[float] = field(default_factory=list, init=False, repr=False)
     _y: list[float] = field(default_factory=list, init=False, repr=False)
     _is_dense_index: bool = field(default=False, init=False, repr=False)
-    _coords: dict[int, tuple[float, float]] = field(default_factory=dict, init=False, repr=False)
+    _coords: dict[int, tuple[float, float]] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _distance_matrix: Optional[np.ndarray] = field(
         default=None,
         init=False,
@@ -53,7 +57,7 @@ class Grafo:
         """Builds distance matrix for the graph."""
         if self._distance_matrix is not None:
             return self._distance_matrix
-        
+
         max_id = max(self.cidades.keys()) if self.cidades else 0
         dim = max_id + 1
         D = np.zeros((dim, dim))
@@ -61,6 +65,10 @@ class Grafo:
             for j in self.cidades:
                 if i != j:
                     D[i, j] = self.distancia(i, j)
+                else:
+                    D[i, j] = math.inf
+        D[0, :] = np.inf
+        D[:, 0] = np.inf
         self._distance_matrix = D
         return D
 
@@ -76,7 +84,10 @@ class Grafo:
                 self._is_dense_index = True
             else:
                 self._coords = {
-                    cid: (float(c.x if c.x is not None else 0.0), float(c.y if c.y is not None else 0.0))
+                    cid: (
+                        float(c.x if c.x is not None else 0.0),
+                        float(c.y if c.y is not None else 0.0),
+                    )
                     for cid, c in self.cidades.items()
                 }
                 self._is_dense_index = False
@@ -94,8 +105,14 @@ class Grafo:
                 coordenada_2 = self._coords[id2]
                 distancia_x = coordenada_1[0] - coordenada_2[0]
                 distancia_y = coordenada_1[1] - coordenada_2[1]
-            distancia = math.sqrt(distancia_x * distancia_x + distancia_y * distancia_y)
-            return float(math.ceil(distancia)) if self.edge_weight_type == 'CEIL_2D' else distancia
+            distancia = math.sqrt(
+                distancia_x * distancia_x + distancia_y * distancia_y
+            )
+            return (
+                float(math.ceil(distancia))
+                if self.edge_weight_type == 'CEIL_2D'
+                else distancia
+            )
         else:  # EXPLICIT
             key = (min(id1, id2), max(id1, id2))
             return self.distancias[key]
@@ -153,13 +170,18 @@ class TTPInstance:
 
     @property
     def num_cities(self) -> int:
-        return self.dimension if self.dimension > 0 else len(self.grafo.cidades)
+        return (
+            self.dimension if self.dimension > 0 else len(self.grafo.cidades)
+        )
+
 
 @dataclass
 class SolucaoTTP:
-    rota: list[int]               # ordered list of city IDs to visit
-    plano_coleta: dict[int, list[int]]  # city_id -> list of item IDs to collect there
-      
+    rota: list[int]  # ordered list of city IDs to visit
+    plano_coleta: dict[
+        int, list[int]
+    ]  # city_id -> list of item IDs to collect there
+
     @property
     def tour(self) -> list[int]:
         return self.rota
@@ -196,9 +218,15 @@ class Tour:
     def __post_init__(self):
         self.length = len(self.order)
         self.length_minus_1 = self.length - 1
-        self.pos = np.empty(self.length, dtype=int)
+
+        max_vertex = max(self.order)
+
+        self.pos = np.empty(max_vertex + 1, dtype=int)
+        self.pos.fill(-1)
+
         for i, v in enumerate(self.order):
             self.pos[v] = i
+
         self._make_edges()
 
     @staticmethod
@@ -283,40 +311,49 @@ class Tour:
 
         joined = {self.make_pair(int(i), int(j)) for i, j in joined}
 
-        # New edges: old edges minus broken, plus joined
         edges = (self.edges - broken) | joined
 
         if len(edges) < self.length:
             return False, []
 
         successors = {}
-        node = 0
+
+        start_node = self.order[0]
+        node = start_node
 
         while len(edges) > 0:
+            found = False
+
             for i, j in edges:
                 if i == node:
                     successors[node] = j
                     node = j
+                    found = True
                     break
+
                 elif j == node:
                     successors[node] = i
                     node = i
+                    found = True
                     break
+
+            if not found:
+                break
 
             edges.remove((i, j))
 
         if len(successors) < self.length:
             return False, []
 
-        succ = successors[0]
-        new_tour = [0]
-        visited = set(new_tour)
+        succ = successors[start_node]
+
+        new_tour = [start_node]
+        visited = {start_node}
 
         while succ not in visited:
             visited.add(succ)
             new_tour.append(succ)
             succ = successors[succ]
-
         # If we visited all nodes without a loop we have a tour
         return len(new_tour) == self.length, new_tour
 
@@ -392,3 +429,18 @@ class Tour:
 
             self.cost += delta_cost
             return delta_cost
+
+    # Pode ser otimizado para evitar recalcular distâncias já conhecidas
+    def end_distance(self, start_node, grafo: Grafo):
+        pos_start = self.pos[start_node]
+        if pos_start == self.length - 1:
+            return grafo.distance_matrix[start_node, self.order[0]]
+        total_dist = 0
+        for node in self.order[pos_start : self.length - 1]:
+            total_dist += grafo.distance_matrix[
+                node, self.order[self.pos[node] + 1]
+            ]
+        total_dist += grafo.distance_matrix[
+            self.order[self.length - 1], self.order[0]
+        ]
+        return total_dist
