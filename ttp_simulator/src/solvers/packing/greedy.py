@@ -6,6 +6,7 @@ from typing import List
 import numpy as np
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
+from src.core.fast_evaluator import FastTTPEvaluator
 from src.core.models import Item, Tour, TTPInstance
 
 
@@ -13,6 +14,7 @@ from src.core.models import Item, Tour, TTPInstance
 class IGP:
     scenario: TTPInstance
     tour: Tour
+    modelo: str = "TTP1"
 
     def sort_items(self, item_list: List[Item], k, beta, gamma):
         value_dict = {}
@@ -52,13 +54,14 @@ class IGP:
 
     def find_best_adjustment(
         self,
+        evaluator: FastTTPEvaluator,
         best_packed_items: List[Item],
         best_k: float,
         best_beta: float,
         theta: float,
         gamma: float,
         delta: float,
-        best_weight: float,
+        best_score: float,
     ):
         adj_k_up, adj_beta_up = best_k + theta, best_beta + theta
         adj_k_down, adj_beta_down = best_k - theta, best_beta - theta
@@ -67,11 +70,12 @@ class IGP:
 
         # Itera em combinações de ajustes
         for k, beta in product(k_values, beta_values):
-            packed_items, current_weight = self.greedy_packing(
+            packed_items, _ = self.greedy_packing(
                 self.sort_items(self.scenario.itens, k, beta, gamma), delta
             )
-            if current_weight < best_weight:
-                best_weight = current_weight
+            score = evaluator.calcular_lucro({item.id for item in packed_items})
+            if score > best_score:
+                best_score = score
                 best_packed_items = packed_items
                 (
                     best_k,
@@ -81,7 +85,7 @@ class IGP:
                     beta,
                 )
         return (
-            best_weight,
+            best_score,
             best_packed_items,
             best_k,
             best_beta,
@@ -103,19 +107,30 @@ class IGP:
         theta: float = 5,
         num_iterations: int = 20,
     ):
+        # Guardrail para caso de borda sem itens
+        if not self.scenario.itens:
+            return {}
 
+        evaluator = FastTTPEvaluator(
+            self.scenario, self.tour.order, modelo=self.modelo
+        )
         item_list = self.scenario.itens
-        best_weight = math.inf
-        for _ in range(
-            int(1000 / log(self.scenario.dimension * len(self.scenario.itens)))
-        ):
+        best_score = -math.inf
+        best_packed_items: List[Item] = []
+        best_k = best_beta = best_gamma = best_delta = None
+
+        total_dim = max(self.scenario.num_cities * len(self.scenario.itens), 2)
+        num_samples = int(1000 / log(total_dim))
+
+        for _ in range(num_samples):
             k, beta, gamma = np.random.rand(3)
             delta = np.random.uniform(0.5, 1)
-            packed_items, current_weight = self.greedy_packing(
+            packed_items, _ = self.greedy_packing(
                 self.sort_items(item_list, k, beta, gamma), delta
             )
-            if current_weight < best_weight:
-                best_weight = current_weight
+            score = evaluator.calcular_lucro({item.id for item in packed_items})
+            if score > best_score:
+                best_score = score
                 best_packed_items = packed_items
                 best_k, best_beta, best_gamma, best_delta = (
                     k,
@@ -123,23 +138,32 @@ class IGP:
                     gamma,
                     delta,
                 )
-        if not best_k or not best_beta or not best_gamma or not best_delta:
+
+        if (
+            best_k is None
+            or best_beta is None
+            or best_gamma is None
+            or best_delta is None
+        ):
             raise ValueError('No valid solution found')
+
         for _ in range(num_iterations):
             (
-                best_weight,
+                best_score,
                 best_packed_items,
                 best_k,
                 best_beta,
             ) = self.find_best_adjustment(
+                evaluator=evaluator,
                 best_packed_items=best_packed_items,
                 best_k=best_k,
                 best_beta=best_beta,
                 theta=theta,
                 gamma=best_gamma,
                 delta=best_delta,
-                best_weight=best_weight,
+                best_score=best_score,
             )
             theta -= 0.75
+
         best_pack_dict = self.parse_solution(best_packed_items)
         return best_pack_dict
