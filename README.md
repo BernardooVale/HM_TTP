@@ -153,10 +153,12 @@ HM_TTP/
 │   ├── bateria_testes/           # Instâncias de teste (.txt e .ttp)
 │   │   └── alto_prejuizo/        # Subpasta para instâncias desbalanceadas (Razão < 0.5)
 │   ├── src/
+│   │   ├── config/               # Hiperparâmetros calibrados e gerenciador de configurações
 │   │   ├── core/                 # Modelos matemáticos (models, evaluators)
-│   │   ├── solvers/              # Implementações de solucionadores e template
-│   │   ├── scenarios/            # Leitores de instâncias (.txt / .ttp)
+│   │   ├── performance/          # Aceleração de alta performance (kernels JIT Numba e RAM cache)
 │   │   ├── runners/              # Motores paralelos BatchRunner com Resume
+│   │   ├── scenarios/            # Leitores de instâncias (.txt / .ttp)
+│   │   ├── solvers/              # Solucionadores categorizados (constructive, iterative, tsp, packing, templates)
 │   │   └── utils/                # Loggers CSV e métricas
 │   └── tests/                    # Bateria de testes automatizados com pytest
 │

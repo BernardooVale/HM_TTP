@@ -1,7 +1,7 @@
 from typing import List
 import numpy as np
 from src.core.models import Grafo
-from src.solvers.numba_kernels import (
+from src.performance.numba_kernels import (
     NUMBA_AVAILABLE,
     numba_otimizar_2opt,
     numba_caminho_fixo_bb,

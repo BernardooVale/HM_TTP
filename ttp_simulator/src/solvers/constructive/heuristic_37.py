@@ -2,7 +2,7 @@ import math
 from typing import Dict, List, Optional
 from src.core.models import TTPInstance, SolucaoTTP, Item, Grafo
 from src.solvers.base import BaseSolver, SolverRegistry
-from .config_manager import obter_melhor_configuracao
+from src.config.config_manager import obter_melhor_configuracao
 
 
 from src.solvers.tsp import (
@@ -162,7 +162,7 @@ class Heuristic37Solver(BaseSolver):
                 break
 
         if self.refinamento:
-            from src.solvers.pack_iterative import refinar_plano_coleta
+            from src.solvers.iterative.pack_iterative import refinar_plano_coleta
             plano_coleta = refinar_plano_coleta(
                 instance, rota, plano_coleta, modelo=self.modelo
             )

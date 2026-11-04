@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 from src.core.models import TTPInstance, SolucaoTTP, Item
 from src.solvers.base import BaseSolver, SolverRegistry
 from src.solvers.tsp import obter_melhor_rota_tsp
-from src.solvers.pack_iterative import refinar_plano_coleta
+from src.solvers.iterative.pack_iterative import refinar_plano_coleta
 
 
 def _calcular_distancias_restantes(instance: TTPInstance, rota: List[int]) -> tuple[Dict[int, float], float]:

@@ -3,7 +3,7 @@ from typing import Dict, List
 from src.core.models import TTPInstance, SolucaoTTP, Item
 from src.solvers.base import BaseSolver, SolverRegistry
 from src.core.evaluator_ttp1 import avaliar_ttp1
-from src.solvers.baselines import RandomSolver
+from src.solvers.constructive.baselines import RandomSolver
 
 @SolverRegistry.register
 class AlternateLocalSearchSolver(BaseSolver):

@@ -56,12 +56,12 @@ from src.core.evaluator_ttp1 import avaliar_ttp1
 from src.core.evaluator_ttp2 import avaliar_ttp2
 from src.scenarios.parser import InstanceParser
 from src.solvers.base import SolverRegistry
-from src.solvers.numba_kernels import (
+from src.performance.numba_kernels import (
     NUMBA_AVAILABLE,
     detectar_memoria_sistema_bytes,
     obter_cache_ram_global,
 )
-from src.solvers.queimada import QueimadaSolver
+from src.solvers.constructive.queimada import QueimadaSolver
 from src.utils.results_manager import (
     obter_instancias_equilibradas,
     obter_instancias_lucrativas,
@@ -764,7 +764,7 @@ def executar_grid_search(
     # Auto-atualização dinâmica da configuração campeã no config_manager
     if ranking:
         try:
-            from src.solvers.config_manager import atualizar_campeao_se_melhor
+            from src.config.config_manager import atualizar_campeao_se_melhor
             melhor_g, _, _, melhor_c_id = ranking[0]
             melhor_cfg = configuracoes[melhor_c_id]
             atualizou = atualizar_campeao_se_melhor(

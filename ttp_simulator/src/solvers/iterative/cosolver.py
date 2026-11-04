@@ -13,7 +13,7 @@ from src.core.models import TTPInstance, SolucaoTTP
 from src.core.evaluator_ttp1 import avaliar_ttp1
 from src.solvers.base import BaseSolver, SolverRegistry
 from src.solvers.tsp import obter_melhor_rota_tsp
-from src.solvers.pack_iterative import resolver_pack_iterative, refinar_plano_coleta
+from src.solvers.iterative.pack_iterative import resolver_pack_iterative, refinar_plano_coleta
 
 
 @SolverRegistry.register

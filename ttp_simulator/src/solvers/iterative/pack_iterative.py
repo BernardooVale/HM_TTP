@@ -14,7 +14,7 @@ from src.core.models import TTPInstance, SolucaoTTP, Item
 from src.core.fast_evaluator import FastTTPEvaluator
 from src.solvers.base import BaseSolver, SolverRegistry
 from src.solvers.tsp import obter_melhor_rota_tsp
-from src.solvers.numba_kernels import (
+from src.performance.numba_kernels import (
     NUMBA_AVAILABLE,
     numba_refinar_ttp1,
     numba_refinar_ttp2,

@@ -105,7 +105,7 @@ def test_registered_solvers_produce_valid_solution(solver_name, sample_instance)
 @pytest.mark.parametrize("direcao", ["calor_final", "calor_inicio"])
 @pytest.mark.parametrize("selecao", ["greedy_relative", "knapsack_relative"])
 def test_queimada_all_variations(temp, diss, direcao, selecao, sample_instance):
-    from src.solvers.queimada import QueimadaSolver
+    from src.solvers.constructive.queimada import QueimadaSolver
     solver = QueimadaSolver(
         temperatura=temp,
         dissipacao=diss,
@@ -125,7 +125,7 @@ def test_queimada_all_variations(temp, diss, direcao, selecao, sample_instance):
 
 
 def test_queimada_otimizar_buracos(sample_instance):
-    from src.solvers.queimada import QueimadaSolver, otimizar_trechos_vazios
+    from src.solvers.constructive.queimada import QueimadaSolver, otimizar_trechos_vazios
     
     # Rota intencionalmente com cruzamento em cidades vazias
     rota = [1, 4, 3, 2] # Cidades 3 e 4 vazias
@@ -168,12 +168,12 @@ def test_queimada_directed_variations(sample_instance):
 
 
 def test_adaptive_ram_cache_and_numba_equivalence(sample_instance):
-    from src.solvers.numba_kernels import (
+    from src.performance.numba_kernels import (
         AdaptiveRAMCache,
         detectar_memoria_sistema_bytes,
         obter_cache_ram_global,
     )
-    from src.solvers.queimada import QueimadaSolver
+    from src.solvers.constructive.queimada import QueimadaSolver
 
     total_b, avail_b = detectar_memoria_sistema_bytes()
     assert total_b > 0
@@ -206,3 +206,57 @@ def test_adaptive_ram_cache_and_numba_equivalence(sample_instance):
     assert sol1.rota == sol2.rota
     assert sol1.plano_coleta == sol2.plano_coleta
     assert global_cache.hits > hits_antes
+
+
+def test_new_modular_structure_imports():
+    # 1. Performance module
+    from src.performance.numba_kernels import AdaptiveRAMCache
+    from src.performance import AdaptiveRAMCache as ARC_pkg
+    assert AdaptiveRAMCache is ARC_pkg
+
+    # 2. Config module
+    from src.config.config_manager import obter_melhor_configuracao
+    from src.config import obter_melhor_configuracao as omc_pkg
+    assert obter_melhor_configuracao is omc_pkg
+
+    # 3. Constructive heuristics
+    from src.solvers.constructive.queimada import QueimadaSolver
+    from src.solvers.constructive.heuristic_37 import Heuristic37Solver
+    from src.solvers.constructive.s2_s5_solvers import S2HeuristicSolver, S5HeuristicSolver
+    from src.solvers.constructive.baselines import RandomSolver, GreedyIsolatedSolver
+    from src.solvers.constructive import (
+        QueimadaSolver as QS_pkg,
+        Heuristic37Solver as H37_pkg,
+        S2HeuristicSolver as S2_pkg,
+        S5HeuristicSolver as S5_pkg,
+        RandomSolver as RS_pkg,
+        GreedyIsolatedSolver as GIS_pkg,
+    )
+    assert QueimadaSolver is QS_pkg
+    assert Heuristic37Solver is H37_pkg
+    assert S2HeuristicSolver is S2_pkg
+    assert S5HeuristicSolver is S5_pkg
+    assert RandomSolver is RS_pkg
+    assert GreedyIsolatedSolver is GIS_pkg
+
+    # 4. Templates module
+    from src.solvers.templates.template_heuristica import TemplateHeuristicaSolver
+    from src.solvers.templates import TemplateHeuristicaSolver as THS_pkg
+    assert TemplateHeuristicaSolver is THS_pkg
+
+    # 5. Iterative / Local Search module
+    from src.solvers.iterative.cosolver import CoSolver
+    from src.solvers.iterative.local_search import AlternateLocalSearchSolver
+    from src.solvers.iterative.pack_iterative import PackIterativeSolver, refinar_plano_coleta, resolver_pack_iterative
+    from src.solvers.iterative import (
+        CoSolver as CS_pkg,
+        AlternateLocalSearchSolver as ALSS_pkg,
+        PackIterativeSolver as PIS_pkg,
+        refinar_plano_coleta as rpc_pkg,
+        resolver_pack_iterative as rpi_pkg,
+    )
+    assert CoSolver is CS_pkg
+    assert AlternateLocalSearchSolver is ALSS_pkg
+    assert PackIterativeSolver is PIS_pkg
+    assert refinar_plano_coleta is rpc_pkg
+    assert resolver_pack_iterative is rpi_pkg

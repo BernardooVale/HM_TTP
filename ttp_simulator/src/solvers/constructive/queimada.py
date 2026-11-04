@@ -7,13 +7,13 @@ import numpy as np
 
 from src.core.models import Item, SolucaoTTP, TTPInstance
 from src.solvers.base import BaseSolver, SolverRegistry
-from .config_manager import obter_melhor_configuracao
+from src.config.config_manager import obter_melhor_configuracao
 from src.solvers.tsp import (
     otimizar_2opt,
     resolver_caminho_fixo_bb,
     resolver_caminho_fixo_2opt,
 )
-from src.solvers.numba_kernels import (
+from src.performance.numba_kernels import (
     NUMBA_AVAILABLE,
     obter_cache_ram_global,
     numba_knapsack_01_bb,
@@ -902,7 +902,7 @@ class QueimadaSolver(BaseSolver):
             cache.set(base_key, {cid: tuple(ids) for cid, ids in plano_coleta.items()})
 
         if self.refinamento:
-            from src.solvers.pack_iterative import refinar_plano_coleta
+            from src.solvers.iterative.pack_iterative import refinar_plano_coleta
             plano_coleta = refinar_plano_coleta(
                 instance, rota, plano_coleta, modelo=self.modelo
             )

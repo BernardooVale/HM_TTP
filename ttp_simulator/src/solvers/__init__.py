@@ -3,22 +3,61 @@ import pkgutil
 from pathlib import Path
 
 from .base import BaseSolver, SolverRegistry
-from .baselines import GreedyIsolatedSolver, RandomSolver
-from .cosolver import CoSolver
-from .heuristic_37 import Heuristic37Solver
-from .local_search import AlternateLocalSearchSolver
-from .pack_iterative import PackIterativeSolver, refinar_plano_coleta, resolver_pack_iterative
-from .queimada import QueimadaSolver
-from .s2_s5_solvers import S2HeuristicSolver, S5HeuristicSolver
+from .constructive import (
+    GreedyIsolatedSolver,
+    Heuristic37Solver,
+    QueimadaSolver,
+    RandomSolver,
+    S2HeuristicSolver,
+    S5HeuristicSolver,
+)
+from .iterative import (
+    AlternateLocalSearchSolver,
+    CoSolver,
+    PackIterativeSolver,
+    refinar_plano_coleta,
+    resolver_pack_iterative,
+)
 
-# Auto-descoberta de quaisquer novos solucionadores adicionados na pasta src/solvers
+# Auto-descoberta de quaisquer novos solucionadores adicionados na pasta src/solvers e subpastas
 _pasta_solvers = Path(__file__).parent
+_ignorar = {
+    "base",
+    "__init__",
+    "tsp",
+    "packing",
+    "templates",
+    "constructive",
+    "iterative",
+}
+
+# 1. Scaneia solucionadores adicionais na raiz de solvers/
 for _mod_info in pkgutil.iter_modules([str(_pasta_solvers)]):
-    if not _mod_info.ispkg and _mod_info.name not in ("base", "__init__", "tsp"):
+    if not _mod_info.ispkg and _mod_info.name not in _ignorar:
         try:
             importlib.import_module(f".{_mod_info.name}", package=__name__)
         except Exception:
             pass
+
+# 2. Scaneia solucionadores em solvers/constructive/
+_pasta_constructive = _pasta_solvers / "constructive"
+if _pasta_constructive.exists():
+    for _mod_info in pkgutil.iter_modules([str(_pasta_constructive)]):
+        if not _mod_info.ispkg and _mod_info.name not in ("__init__",):
+            try:
+                importlib.import_module(f".constructive.{_mod_info.name}", package=__name__)
+            except Exception:
+                pass
+
+# 3. Scaneia solucionadores em solvers/iterative/
+_pasta_iterative = _pasta_solvers / "iterative"
+if _pasta_iterative.exists():
+    for _mod_info in pkgutil.iter_modules([str(_pasta_iterative)]):
+        if not _mod_info.ispkg and _mod_info.name not in ("__init__",):
+            try:
+                importlib.import_module(f".iterative.{_mod_info.name}", package=__name__)
+            except Exception:
+                pass
 
 __all__ = [
     "BaseSolver",
