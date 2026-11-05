@@ -260,3 +260,44 @@ def test_new_modular_structure_imports():
     assert PackIterativeSolver is PIS_pkg
     assert refinar_plano_coleta is rpc_pkg
     assert resolver_pack_iterative is rpi_pkg
+
+
+def test_heuristic_37_hyperparameters(sample_instance):
+    from src.solvers.constructive.heuristic_37 import Heuristic37Solver
+
+    # Test with custom hyperparameters
+    solver = Heuristic37Solver(
+        taxa_amostragem=0.50,
+        metodo_tsp="farthest_insertion",
+        refinamento_rota=True,
+        limiar_simetrico=True,
+        preenchimento_pos=True,
+        refinamento=False,
+    )
+    solucao = solver.solve(sample_instance)
+    assert len(solucao.rota) == 4
+    assert solucao.rota[0] == 1
+    assert set(solucao.rota) == {1, 2, 3, 4}
+
+    peso_total = sum(
+        sample_instance.itens[it_id - 1].peso
+        for it_ids in solucao.plano_coleta.values()
+        for it_id in it_ids
+    )
+    assert peso_total <= sample_instance.capacidade_mochila
+
+
+def test_heuristic_37_grid_search_spaces():
+    from scripts.experimentos_37.grid_search_paralelo import gerar_espaco_configuracoes
+
+    padrao = gerar_espaco_configuracoes("padrao")
+    assert len(padrao) == 48
+
+    completo = gerar_espaco_configuracoes("completo")
+    assert len(completo) == 288
+
+    rapido = gerar_espaco_configuracoes("rapido")
+    assert len(rapido) == 12
+
+    focado = gerar_espaco_configuracoes("focado")
+    assert len(focado) == 36

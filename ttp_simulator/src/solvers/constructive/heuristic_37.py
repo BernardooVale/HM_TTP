@@ -9,6 +9,7 @@ from src.solvers.tsp import (
     resolver_tsp_farthest_insertion,
     resolver_tsp_multistart_nn,
     obter_melhor_rota_tsp,
+    otimizar_2opt,
 )
 
 
@@ -16,23 +17,32 @@ from src.solvers.tsp import (
 class Heuristic37Solver(BaseSolver):
     """
     Solucionador baseado na teoria do Problema da Secretária (regra dos 37%):
-    - Constrói uma rota TSP de alta qualidade (Farthest Insertion / Multi-start) iniciando em 1.
+    - Constrói uma rota TSP de alta qualidade (Farthest Insertion / Multi-start / 2-opt) iniciando em 1.
     - Avalia os itens na ordem sequencial da rota (ordem de chegada/descoberta).
     - Utiliza o custo marginal real de transporte (distância restante até a cidade 1).
     - Observa os primeiros 37% dos itens para calibrar o limiar de qualidade (benchmark).
     - A partir dos 37%, seleciona itens que superem esse benchmark enquanto couber na mochila.
+    - Opcionalmente realiza preenchimento guloso pós-secretária e refinamento Drop & Add (PackIterative).
     """
 
     def __init__(
         self,
         refinamento: Optional[bool] = None,
         limiar_simetrico: Optional[bool] = None,
+        taxa_amostragem: Optional[float] = None,
+        metodo_tsp: Optional[str] = None,
+        refinamento_rota: Optional[bool] = None,
+        preenchimento_pos: Optional[bool] = None,
         modelo: str = "TTP1",
         nome: Optional[str] = None,
     ):
         cfg = obter_melhor_configuracao("heuristic_37")
         self.refinamento = refinamento if refinamento is not None else cfg.get("refinamento", True)
         self.limiar_simetrico = limiar_simetrico if limiar_simetrico is not None else cfg.get("limiar_simetrico", False)
+        self.taxa_amostragem = taxa_amostragem if taxa_amostragem is not None else cfg.get("taxa_amostragem", 0.37)
+        self.metodo_tsp = metodo_tsp if metodo_tsp is not None else cfg.get("metodo_tsp", "melhor")
+        self.refinamento_rota = refinamento_rota if refinamento_rota is not None else cfg.get("refinamento_rota", False)
+        self.preenchimento_pos = preenchimento_pos if preenchimento_pos is not None else cfg.get("preenchimento_pos", True)
         self.modelo = modelo
         self._nome = nome or "heuristic_37"
 
@@ -40,9 +50,21 @@ class Heuristic37Solver(BaseSolver):
     def nome(self) -> str:
         return self._nome
 
-    def solve(self, instance: TTPInstance) -> SolucaoTTP:
-        # 1. Rota TSP de menor distância iniciando na cidade 1
-        rota = obter_melhor_rota_tsp(instance.grafo)
+    def solve(self, instance: TTPInstance, rota: Optional[List[int]] = None) -> SolucaoTTP:
+        # 1. Rota TSP iniciando na cidade 1
+        if rota is not None:
+            rota = list(rota)
+        else:
+            if self.metodo_tsp == "farthest_insertion":
+                rota = resolver_tsp_farthest_insertion(instance.grafo)
+            elif self.metodo_tsp == "multistart_nn":
+                rota = resolver_tsp_multistart_nn(instance.grafo)
+            else:
+                rota = obter_melhor_rota_tsp(instance.grafo)
+
+            if self.refinamento_rota:
+                rota = otimizar_2opt(rota, instance.grafo)
+
         n = len(rota)
 
         # 2. Distâncias restantes de cada cidade até o fechamento do ciclo na cidade 1
@@ -99,11 +121,11 @@ class Heuristic37Solver(BaseSolver):
             itens_sequenciais.extend(cidade.itens)
 
         m = len(itens_sequenciais)
-        limite_calibracao = int(0.37 * m)
+        limite_calibracao = max(1, int(self.taxa_amostragem * m)) if m > 0 else 0
         itens_calibracao = itens_sequenciais[:limite_calibracao]
         itens_coleta = itens_sequenciais[limite_calibracao:]
 
-        # Fase de calibração: observa os scores intrínsecos dos primeiros 37% (avaliados em mochila vazia)
+        # Fase de calibração: observa os scores intrínsecos dos primeiros itens da amostragem (avaliados em mochila vazia)
         scores_calibracao = [calcular_score(item, 0.0) for item in itens_calibracao]
         melhor_threshold = max(scores_calibracao) if scores_calibracao else 0.0
         limiar = max(melhor_threshold, 0.0)
@@ -136,30 +158,31 @@ class Heuristic37Solver(BaseSolver):
                         plano_coleta[item.cidade_origem].append(item.id)
 
         # 5. Preenchimento guloso pós-secretária:
-        itens_candidatos = [it for it in instance.itens if it.id not in itens_coletados_ids]
+        if self.preenchimento_pos:
+            itens_candidatos = [it for it in instance.itens if it.id not in itens_coletados_ids]
 
-        while peso_atual < instance.capacidade_mochila:
-            melhor_item = None
-            melhor_densidade = 0.0
+            while peso_atual < instance.capacidade_mochila:
+                melhor_item = None
+                melhor_densidade = 0.0
 
-            for it in itens_candidatos:
-                if peso_atual + it.peso <= instance.capacidade_mochila:
-                    lucro_adicional = calcular_lucro_marginal(it, peso_atual)
-                    if lucro_adicional > 0:
-                        densidade = lucro_adicional / it.peso if it.peso > 0 else float("inf")
-                        if densidade > melhor_densidade:
-                            melhor_densidade = densidade
-                            melhor_item = it
+                for it in itens_candidatos:
+                    if peso_atual + it.peso <= instance.capacidade_mochila:
+                        lucro_adicional = calcular_lucro_marginal(it, peso_atual)
+                        if lucro_adicional > 0:
+                            densidade = lucro_adicional / it.peso if it.peso > 0 else float("inf")
+                            if densidade > melhor_densidade:
+                                melhor_densidade = densidade
+                                melhor_item = it
 
-            if melhor_item is not None:
-                peso_atual += melhor_item.peso
-                itens_coletados_ids.add(melhor_item.id)
-                itens_candidatos.remove(melhor_item)
-                if melhor_item.cidade_origem not in plano_coleta:
-                    plano_coleta[melhor_item.cidade_origem] = []
-                plano_coleta[melhor_item.cidade_origem].append(melhor_item.id)
-            else:
-                break
+                if melhor_item is not None:
+                    peso_atual += melhor_item.peso
+                    itens_coletados_ids.add(melhor_item.id)
+                    itens_candidatos.remove(melhor_item)
+                    if melhor_item.cidade_origem not in plano_coleta:
+                        plano_coleta[melhor_item.cidade_origem] = []
+                    plano_coleta[melhor_item.cidade_origem].append(melhor_item.id)
+                else:
+                    break
 
         if self.refinamento:
             from src.solvers.iterative.pack_iterative import refinar_plano_coleta
@@ -192,10 +215,10 @@ SolverRegistry.register(
         {"nome": "heuristic_37_ttp2", "__init__": lambda self: Heuristic37Solver.__init__(self, modelo="TTP2", nome="heuristic_37_ttp2")},
     )
 )
-SolverRegistry.register(
-    type(
-        "Heuristic37SemRefinamentoSolver",
-        (Heuristic37Solver,),
-        {"nome": "heuristic_37_sem_refinamento", "__init__": lambda self: Heuristic37Solver.__init__(self, refinamento=False, nome="heuristic_37_sem_refinamento")},
-    )
-)
+SolverRegistry.register(
+    type(
+        "Heuristic37SemRefinamentoSolver",
+        (Heuristic37Solver,),
+        {"nome": "heuristic_37_sem_refinamento", "__init__": lambda self: Heuristic37Solver.__init__(self, refinamento=False, nome="heuristic_37_sem_refinamento")},
+    )
+)

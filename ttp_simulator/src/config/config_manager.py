@@ -44,6 +44,10 @@ FALLBACK_CONFIGURACOES: Dict[str, Dict[str, Any]] = {
         "parametros": {
             "refinamento": True,
             "limiar_simetrico": False,
+            "taxa_amostragem": 0.37,
+            "metodo_tsp": "melhor",
+            "refinamento_rota": False,
+            "preenchimento_pos": True,
         },
         "score_medio": 634.42,
         "origem": "benchmark_refinado",

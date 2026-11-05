@@ -1,6 +1,6 @@
 # 🚚 Framework Experimental do Travelling Thief Problem (TTP)
 
-Ambiente computacional de alto desempenho, modular e reproduzível para simulação, experimentação em lote, benchmarking estatístico, exploração de hiperparâmetros da **Heurística da Queimada** e visualização interativa de resultados para o **Travelling Thief Problem**.
+Ambiente computacional de alto desempenho, modular e reproduzível para simulação, experimentação em lote, benchmarking estatístico, exploração de hiperparâmetros da **Heurística da Queimada**, calibração da **Heurística dos 37%** e visualização interativa de resultados para o **Travelling Thief Problem**.
 
 > [!NOTE]
 > **Padrão da Literatura (TTP1):** Quase 100% dos benchmarks da literatura científica utilizam o modelo monobjetivo **TTP1** (Polyakovskiy et al., 2014; Faulkner et al., 2015). Por padrão, todo o framework opera estritamente sob o **TTP1**. O modelo multiobjetivo **TTP2** é suportado integralmente, porém configurado como **opcional** (ativado via flag `--incluir-ttp2` ou `--modelo TTP2`).
@@ -16,8 +16,9 @@ Ambiente computacional de alto desempenho, modular e reproduzível para simulaç
    - [5.1. CLI Rápido de Solucionadores (`testar_heuristica.py`)](#51-cli-rápido-de-solucionadores-testar_heuristicapy)
    - [5.2. Teste Global e Benchmarking (`scripts/benchmark/`)](#52-teste-global-e-benchmarking-scriptsbenchmark)
    - [5.3. Experimentos e Hipóteses da Queimada (`scripts/experimentos_queimada/`)](#53-experimentos-e-hipóteses-da-queimada-scriptsexperimentos_queimada)
-   - [5.4. Filtros e Gerenciamento Interno de Instâncias (`scripts/instancias/`)](#54-filtros-e-gerenciamento-interno-de-instâncias-scriptsinstancias)
-   - [5.5. Estudo de Sensibilidade ao Parâmetro $R$ (`avaliacao_r/`)](#55-estudo-de-sensibilidade-ao-parâmetro-r-avaliacao_r)
+   - [5.4. Experimentos e Grid Search dos 37% (`scripts/experimentos_37/`)](#54-experimentos-e-grid-search-dos-37-scriptsexperimentos_37)
+   - [5.5. Filtros e Gerenciamento Interno de Instâncias (`scripts/instancias/`)](#55-filtros-e-gerenciamento-interno-de-instâncias-scriptsinstancias)
+   - [5.6. Estudo de Sensibilidade ao Parâmetro $R$ (`avaliacao_r/`)](#56-estudo-de-sensibilidade-ao-parâmetro-r-avaliacao_r)
 6. [Painel Web Interativo (`visualizador/`)](#6-painel-web-interativo-visualizador)
 7. [Dicionário de Resultados (`results/`)](#7-dicionário-de-resultados-results)
 8. [Testes Automatizados](#8-testes-automatizados)
@@ -133,6 +134,8 @@ HM_TTP/
 │   │   ├── grid_search_paralelo.py
 │   │   ├── grid_search_queimada.py
 │   │   └── executar_comparativo.py
+│   ├── experimentos_37/          # 🎯 Grid search e calibração da Heurística dos 37%
+│   │   └── grid_search_paralelo.py
 │   └── instancias/               # 🧹 Scripts internos de triagem e quarentena
 │       ├── separar_alto_prejuizo.py
 │       ├── filtrar_instancias_lucro.py
@@ -141,13 +144,10 @@ HM_TTP/
 │
 ├── results/                      # 📊 Pasta ÚNICA de saída para todos os CSVs
 │   ├── README.md                 # Dicionário de arquivos e colunas dos resultados
-│   ├── bateria_solucoes_detalhada.csv
-│   ├── comparativo_estatisticas_ttp1_ttp2.csv
-│   ├── comparativo_estatisticas_normalizadas.csv
-│   ├── bateria_equilibradas_detalhada.csv
-│   ├── comparativo_estatisticas_equilibradas.csv
-│   ├── triagem_alto_prejuizo.csv
-│   └── grid_search_queimada_completo.csv
+│   ├── todos/                    # Baterias consolidadas de todos os solvers
+│   ├── queimada/                 # Resultados exclusivos da Heurística da Queimada
+│   ├── heuristica_37/            # Resultados exclusivos da Heurística dos 37%
+│   └── triagem/                  # Diagnósticos e filtragens teóricas de instâncias
 │
 ├── ttp_simulator/                # 🚚 Motor central do TTP
 │   ├── bateria_testes/           # Instâncias de teste (.txt e .ttp)
@@ -255,7 +255,27 @@ python scripts/experimentos_queimada/executar_comparativo.py
 
 ---
 
-### 5.4. Filtros e Gerenciamento Interno de Instâncias (`scripts/instancias/`)
+### 5.4. Experimentos e Grid Search dos 37% (`scripts/experimentos_37/`)
+
+Scripts dedicados a calibrar a regra dos 37% (Problema da Secretária) e auto-atualizar a configuração campeã no `config_manager.py`:
+
+```bash
+# 1. Grid Search Paralelo no espaço padrão (48 combinações):
+python scripts/experimentos_37/grid_search_paralelo.py --espaco padrao --instancias equilibradas
+
+# 2. Espaço rápido (construtivo ultra-rápido sem busca local):
+python scripts/experimentos_37/grid_search_paralelo.py --espaco rapido --instancias sinteticas
+
+# 3. Espaço focado na calibração fina da taxa de corte da secretária (15% a 50%):
+python scripts/experimentos_37/grid_search_paralelo.py --espaco focado --workers 8
+
+# 4. Espaço completo com varredura total (288 combinações):
+python scripts/experimentos_37/grid_search_paralelo.py --espaco completo --instancias leves --workers 8
+```
+
+---
+
+### 5.5. Filtros e Gerenciamento Interno de Instâncias (`scripts/instancias/`)
 
 Módulos internos para auditar, balancear e isolar instâncias da base:
 
@@ -286,7 +306,7 @@ python scripts/instancias/gerar_cenarios_teste.py
 
 ---
 
-### 5.5. Estudo de Sensibilidade ao Parâmetro $R$ (`avaliacao_r/`)
+### 5.6. Estudo de Sensibilidade ao Parâmetro $R$ (`avaliacao_r/`)
 
 Mapeia o comportamento das heurísticas sob variação sistemática da taxa de aluguel por unidade de tempo ($R$), identificando o ponto de transição ($R_c$) e as zonas de acoplamento forte:
 
@@ -334,6 +354,8 @@ Todos os dados exportados ficam centralizados em [`results/`](file:///results/) 
 | `grid_search_queimada_completo.csv` | 2.880 configurações avaliadas com afinidade térmica e backward edges. |
 | `grid_search_queimada_padrao.csv` | 288 configurações do espaço clássico. |
 | `grid_search_queimada_rapido.csv` | Espaço construtivo rápido sem 2-opt. |
+| `grid_search_37_padrao.csv` | 48 configurações da Heurística dos 37% (taxa, TSP, 2-opt, limiar e refino). |
+| `grid_search_37_completo.csv` | 288 configurações completas da Heurística dos 37%. |
 
 ---
 
@@ -346,4 +368,4 @@ A suíte de testes unitários cobre modelos matemáticos, parsers, avaliadores e
 .\.venv\Scripts\pytest -v
 ```
 
-Todos os 97 testes automatizados devem passar com sucesso em frações de segundo.
+Todos os 108 testes automatizados passam com sucesso em frações de segundo.

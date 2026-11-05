@@ -21,7 +21,14 @@ Destinado a avaliar cientificamente as opções e configurações estruturais da
 
 ---
 
-## 🧹 3. `instancias/` (Filtros e Gerenciamento Interno de Instâncias)
+## 🎯 3. `experimentos_37/` (Hipóteses da Heurística dos 37% - Problema da Secretária)
+Destinado a calibrar os hiperparâmetros da Heurística dos 37% (taxa de corte da secretária, métodos de rota TSP, refinamento 2-opt, limiar simétrico, preenchimento pós-secretária e busca local Drop & Add).
+
+- **`grid_search_paralelo.py`**: Motor de avaliação combinatória paralela para a Heurística dos 37%. Suporta os espaços `padrao` (48 configs), `completo` (288 configs), `rapido` (12 configs) e `focado` (36 configs de taxa). Inclui retomada automática (Resume), análise de impacto marginal de parâmetros e auto-atualização do campeão no `config_manager.py`.
+
+---
+
+## 🧹 4. `instancias/` (Filtros e Gerenciamento Interno de Instâncias)
 Destinado a pré-processar, auditar e organizar a base de instâncias (`bateria_testes/`).
 
 - **`separar_alto_prejuizo.py`**: Triagem econômica que classifica instâncias em `EQUILIBRADA` ($\text{Razão} \ge 0.5$) ou `ALTO_PREJUIZO` ($\text{Razão} < 0.5$), movendo instâncias desbalanceadas e gerando consolidados sem reexecução.

@@ -47,6 +47,7 @@ DIR_TODOS = RESULTS_DIR / "todos"
 DIR_QUEIMADA = RESULTS_DIR / "queimada"
 DIR_HEURISTICA_37 = RESULTS_DIR / "heuristica_37"
 DIR_GRID_SEARCH = DIR_QUEIMADA / "grid_search"
+DIR_GRID_SEARCH_37 = DIR_HEURISTICA_37 / "grid_search"
 DIR_TRIAGEM = RESULTS_DIR / "triagem"
 
 # Aliases de compatibilidade legada
@@ -80,6 +81,12 @@ MAPA_ARQUIVOS_CANONICO: Dict[str, Path] = {
     # Triagem de instâncias
     "triagem_alto_prejuizo.csv": DIR_TRIAGEM / "triagem_alto_prejuizo.csv",
     "filtro_instancias_lucrativas.csv": DIR_TRIAGEM / "filtro_instancias_lucrativas.csv",
+    # Grid Search da Heurística dos 37%
+    "grid_search_37.csv": DIR_GRID_SEARCH_37 / "grid_search_37.csv",
+    "grid_search_37_completo.csv": DIR_GRID_SEARCH_37 / "grid_search_37_completo.csv",
+    "grid_search_37_padrao.csv": DIR_GRID_SEARCH_37 / "grid_search_37_padrao.csv",
+    "grid_search_37_rapido.csv": DIR_GRID_SEARCH_37 / "grid_search_37_rapido.csv",
+    "grid_search_37_focado.csv": DIR_GRID_SEARCH_37 / "grid_search_37_focado.csv",
     # Grid Search da Queimada
     "grid_search_queimada.csv": DIR_GRID_SEARCH / "grid_search_queimada.csv",
     "grid_search_queimada_completo.csv": DIR_GRID_SEARCH / "grid_search_queimada_completo.csv",
