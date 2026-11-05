@@ -196,3 +196,51 @@ Em vez de testar todas as hipóteses simultaneamente, dividimos a exploração e
 2. **`queimada`**:
    - Aumentar o lucro líquido médio $G$ em instâncias com $R \ge 1.0$ (onde a sensibilidade ao aluguel é crítica).
    - Manter o tempo computacional dentro da margem de $\pm 10\%$ em relação à versão Numba atual.
+
+---
+
+## 📚 6. Mapeamento de Ideias e Referências Científicas
+
+Tanto a **Heurística dos 37%** quanto a **Heurística da Queimada** fundamentam-se em princípios consolidados de Otimização Combinatória, Física em Grafos e Teoria de Parada Ótima:
+
+### 6.1. Mapeamento das Ideias da Heurística dos 37%
+1. **Teoria Clássica de Parada Ótima (Optimal Stopping / Secretary Problem):**
+   * *Origem:* Determinar o instante ótimo para cessar a observação de candidatos em sequência aleatória e passar a selecionar quem superar o melhor visto até então.
+   * *Teorema Fundamental:* Para $n \to \infty$, a fração ótima de observação é rigorosamente $1/e \approx 0.367879$ (regra dos 37%).
+   * *Artigos Seminais:*
+     * **Dynkin, E. B. (1963).** *"The optimum choice of the instant for stopping a Markov process"*. *Soviet Mathematics Doklady*, 4, 627–629.
+     * **Ferguson, T. S. (1989).** *"Who solved the secretary problem?"*. *Statistical Science*, 4(3), 282–289.
+     * **Gilbert, J. P., & Mosteller, F. (1966).** *"Recognizing the maximum of a sequence of random variables"*. *Journal of the American Statistical Association*, 61(313), 35–73.
+2. **Extensão para Seleção Múltipla e Problema da Mochila (Knapsack Secretary):**
+   * *Origem:* No TTP, não se escolhe 1 candidato, mas múltiplos itens sujeitos a um limite de peso contínuo $W$.
+   * *Artigos de Referência:*
+     * **Kleinberg, R. (2005).** *"A multiple-choice secretary problem with applications to online auctions"*. In *Proceedings of the 16th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA '05)*, pp. 638–647.
+     * **Babaioff, M., Immorlica, N., Kempe, D., & Kleinberg, R. (2007).** *"A Knapsack Secretary Problem with Applications"*. In *Proceedings of the 8th ACM Conference on Electronic Commerce (EC '07)*, pp. 24–33.
+     * **Kesselheim, T., Radke, K., Tönnis, A., & Vöcking, B. (2014).** *"Primal Beats Dual on Online Packing LPs in the Random-Order Model"*. In *Proceedings of the 46th Annual ACM Symposium on Theory of Computing (STOC '14)*, pp. 303–312.
+
+---
+
+### 6.2. Mapeamento das Ideias da Heurística da Queimada
+1. **Teoria de Difusão Térmica e Campos Potenciais em Grafos:**
+   * *Origem:* Modelar cidades como geradores de temperatura e propagar o calor matricialmente pelas arestas para formar um gradiente atrativo espacial, orientando a rota em direção às regiões quentes antes de retornar ao depósito.
+   * *Artigo de Referência:*
+     * **Kondor, R. I., & Lafferty, J. (2002).** *"Diffusion Kernels on Graphs and Other Discrete Structures"*. In *Proceedings of the 19th International Conference on Machine Learning (ICML '02)*, pp. 315–322.
+2. **Interdependência Rota $\times$ Carga no TTP:**
+   * *Origem:* A rota ótima do TSP puro é subótima para o TTP; é matematicamente vantajoso adiar o carregamento de peso para o final do percurso, mas esse desvio não pode inflar excessivamente o tempo total de viagem $t$.
+   * *Artigos de Referência:*
+     * **Polyakovskiy, S., Bonyadi, M. R., Wagner, M., Michalewicz, Z., & Neumann, F. (2014).** *"A Comprehensive Benchmark Set and Heuristics for the Traveling Thief Problem"*. In *Proceedings of the Genetic and Evolutionary Computation Conference (GECCO '14)*, pp. 977–984.
+     * **Mei, Y., Li, X., & Yao, X. (2014 / 2016).** *"On Investigation of Interdependence Between Sub-problems of the Travelling Thief Problem"*. *Soft Computing*, 20(1), 157–172 (primeira versão em IEEE CEC 2014).
+     * **Bonyadi, M. R., Michalewicz, Z., & Barone, L. (2014).** *"Travelling thief problem: the effect of TSP tour on the quality of solutions"*. In *2014 IEEE Congress on Evolutionary Computation (CEC 2014)*, pp. 300–308.
+3. **Construção de Grafos e Otimização Exata de Trechos Vazios ("Buracos"):**
+   * *Origem:* A rota inicial aproveita uma variação do algoritmo de Kruskal com atratividade por calor; quando itens são selecionados, os segmentos contíguos de cidades sem coleta têm velocidade constante, permitindo resolução exata via Branch and Bound em tempo polinomial rápido.
+   * *Artigos de Referência:*
+     * **Kruskal, J. B. (1956).** *"On the shortest spanning subtree of a graph and the traveling salesman problem"*. *Proceedings of the American Mathematical Society*, 7(1), 48–50.
+     * **Little, J. D., Murty, K. G., Sweeney, D. W., & Karel, C. (1963).** *"An algorithm for the traveling salesman problem"*. *Operations Research*, 11(6), 972–989.
+     * **Lin, S. (1965).** *"Computer solutions of the traveling salesman problem"*. *Bell System Technical Journal*, 44(10), 2245–2269.
+4. **Co-Otimização e Busca Local Coordenada (PackIterative & CoSolver):**
+   * *Origem:* A fase final de refinamento da Queimada utiliza busca local 1-bit-flip (*Drop & Add*) em Numba, inspirada no PackIterative de Faulkner et al. (2015) e nas vizinhanças coordenadas de Martins et al. (2017) e El Yafrani & Ahiod (2018).
+   * *Artigos de Referência:*
+     * **Faulkner, H., Polyakovskiy, S., Schultz, T., & Wagner, M. (2015).** *"Solving the Traveling Thief Problem: PackIterative and Co-Solver Approaches"*. In *IEEE Congress on Evolutionary Computation (CEC 2015)*, pp. 385–392.
+     * **Wagner, M. (2016).** *"Stealing items in the travelling thief problem: greedy heuristics and local search"*. In *Proceedings of the 2016 Genetic and Evolutionary Computation Conference (GECCO '16)*, pp. 317–324.
+     * **Martins, M. S. R., Wagner, M., & Toledo, C. F. M. (2017 / 2018).** *"A hyperheuristic approach based on low-level heuristics for the travelling thief problem"*. *Genetic Programming and Evolvable Machines*, 19(4), 483–512.
+     * **El Yafrani, M., & Ahiod, B. (2018).** *"Efficient approaches for the Travelling Thief Problem"*. *Soft Computing*, 22(14), 4529–4545.
