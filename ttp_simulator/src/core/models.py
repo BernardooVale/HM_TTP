@@ -444,3 +444,29 @@ class Tour:
             self.order[self.length - 1], self.order[0]
         ]
         return total_dist
+
+    def normalize_to_city_1(self):
+        """
+        Rotaciona o tour para que a cidade 1 seja o primeiro elemento
+        de self.order.
+
+        Exemplo:
+            [4, 5, 1, 3, 2]
+        vira:
+            [1, 3, 2, 4, 5]
+
+        O tour continua exatamente o mesmo ciclo, apenas com outra
+        representação linear.
+        """
+        if 1 not in self.order:
+            raise ValueError('Cidade 1 não encontrada no tour')
+
+        idx_city_1 = self.pos[1]
+
+        if idx_city_1 == 0:
+            return
+
+        self.order = self.order[idx_city_1:] + self.order[:idx_city_1]
+
+        for i, node in enumerate(self.order):
+            self.pos[node] = i
