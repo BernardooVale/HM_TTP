@@ -114,6 +114,8 @@ def _executar_uma_tarefa(
         ordem_selecao=cfg["ordem_selecao"],
         refinamento=cfg["refinamento"],
         grafo_direcionado=grafo_dir,
+        adaptar_regime_r=cfg.get("adaptar_regime_r", False),
+        velocidade_dinamica=cfg.get("velocidade_dinamica", False),
         modelo=modelo,
     )
 
@@ -172,6 +174,8 @@ DEFAULTS_PARAMETROS: Dict[str, Any] = {
     "selecao": "greedy_relative",
     "ordem_selecao": "densidade",
     "refinamento": False,
+    "adaptar_regime_r": False,
+    "velocidade_dinamica": False,
 }
 
 
@@ -212,10 +216,12 @@ def _chave_ordenacao_dag_config(cfg: Dict[str, Any]) -> Tuple:
         bool(cfg.get("grafo_direcionado", False)),
         cfg.get("metodo_construcao", ""),
         bool(cfg.get("afinidade_termica", False)),
+        bool(cfg.get("adaptar_regime_r", False)),
         bool(cfg.get("refinamento_rota", False)),
         cfg.get("direcao", ""),
         cfg.get("selecao", ""),
         cfg.get("ordem_selecao", ""),
+        bool(cfg.get("velocidade_dinamica", False)),
         bool(cfg.get("refinamento", False)),
         bool(cfg.get("otimizar_buracos", False)),
     )
@@ -225,6 +231,54 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "completo", deduplicar: bool =
     """
     Gera o conjunto de configurações para o grid search estrutural da Queimada.
     """
+    if tipo_espaco == "estagio1":
+        # Estágio 1 — Otimização de Rota e Campo Térmico (16 configurações ortogonais)
+        temps = ["total_value", "net_value_depot"]
+        dissips = ["dijkstra", "bfs"]
+        metodos = ["backward_edges", "backward_directed"]
+        regimes_r = [False, True]
+        configs = []
+        for temp, diss, met, reg_r in itertools.product(temps, dissips, metodos, regimes_r):
+            configs.append({
+                "temperatura": temp,
+                "dissipacao": diss,
+                "direcao": "calor_final",
+                "metodo_construcao": met,
+                "afinidade_termica": True,
+                "refinamento_rota": True,
+                "otimizar_buracos": True,
+                "selecao": "greedy_relative",
+                "ordem_selecao": "densidade",
+                "refinamento": True,
+                "adaptar_regime_r": reg_r,
+                "velocidade_dinamica": False,
+                "grafo_direcionado": met == "backward_directed",
+            })
+        return configs
+
+    elif tipo_espaco == "estagio2":
+        # Estágio 2 — Otimização de Coleta e Velocidade Marginal (6 configurações ortogonais)
+        ordens_e2 = ["densidade", "reversa", "sequencial"]
+        vels_din = [False, True]
+        configs = []
+        for ordem, v_din in itertools.product(ordens_e2, vels_din):
+            configs.append({
+                "temperatura": "net_value_depot",
+                "dissipacao": "dijkstra",
+                "direcao": "calor_final",
+                "metodo_construcao": "backward_edges",
+                "afinidade_termica": True,
+                "refinamento_rota": True,
+                "otimizar_buracos": True,
+                "selecao": "greedy_relative",
+                "ordem_selecao": ordem,
+                "refinamento": True,
+                "adaptar_regime_r": True,
+                "velocidade_dinamica": v_din,
+                "grafo_direcionado": False,
+            })
+        return configs
+
     temperaturas = ["total_value", "knapsack_exact", "knapsack_greedy"]
     dissipacoes = ["adjacent_only", "dijkstra", "bfs"]
     direcoes = ["calor_final", "calor_inicio"]
@@ -253,6 +307,8 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "completo", deduplicar: bool =
                 "ordem_selecao": ordem,
                 "refinamento": ref,
                 "grafo_direcionado": False,
+                "adaptar_regime_r": False,
+                "velocidade_dinamica": False,
             })
         return configuracoes
 
@@ -284,6 +340,8 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "completo", deduplicar: bool =
                 "ordem_selecao": ordem,
                 "refinamento": ref,
                 "grafo_direcionado": True,
+                "adaptar_regime_r": False,
+                "velocidade_dinamica": False,
             })
         return configuracoes
 
@@ -313,6 +371,8 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "completo", deduplicar: bool =
                 "ordem_selecao": ordem,
                 "refinamento": False,
                 "grafo_direcionado": metodo in ("backward_directed", "forward_directed"),
+                "adaptar_regime_r": False,
+                "velocidade_dinamica": False,
             })
         return configuracoes
 
@@ -348,11 +408,13 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "completo", deduplicar: bool =
                 "ordem_selecao": ordem,
                 "refinamento": ref,
                 "grafo_direcionado": metodo in ("backward_directed", "forward_directed"),
+                "adaptar_regime_r": False,
+                "velocidade_dinamica": False,
             })
         return configuracoes
 
     else:
-        raise ValueError(f"Espaço de busca inválido: {tipo_espaco}. Escolha entre 'completo', 'direcionado', 'padrao', 'rapido'.")
+        raise ValueError(f"Espaço de busca inválido: {tipo_espaco}. Escolha entre 'completo', 'direcionado', 'padrao', 'rapido', 'estagio1', 'estagio2'.")
 
 
 def resolver_instancias(
@@ -466,6 +528,8 @@ def executar_grid_search(
     arquivo_csv: Optional[str] = None,
     max_ram_mb: Optional[float] = None,
     tamanho_lote: Optional[int] = None,
+    deduplicar: bool = True,
+    forcar_campeao: bool = False,
 ):
     """Executa o Grid Search paralelo com salvamento incremental atômico e retomada automática (Resume)."""
     workers = workers or os.cpu_count() or 4
@@ -481,14 +545,14 @@ def executar_grid_search(
         print("❌ Nenhuma instância encontrada para processamento. Abortando.")
         return
 
-    configuracoes = gerar_espaco_configuracoes(tipo_espaco=espaco, deduplicar=True)
+    configuracoes = gerar_espaco_configuracoes(tipo_espaco=espaco, deduplicar=deduplicar)
     total_instancias = len(instancias)
     total_configs = len(configuracoes)
     total_tarefas = total_instancias * total_configs
 
     # Define caminho canônico de saída do CSV (em results/grid_search/)
     if arquivo_csv is None:
-        arquivo_csv_path = resolver_caminho_csv(f"grid_search_queimada_{espaco}.csv")
+        arquivo_csv_path = resolver_caminho_csv("grid_search_queimada_completo.csv")
     else:
         arquivo_csv_path = resolver_caminho_csv(arquivo_csv)
 
@@ -764,16 +828,25 @@ def executar_grid_search(
     # Auto-atualização dinâmica da configuração campeã no config_manager
     if ranking:
         try:
-            from src.config.config_manager import atualizar_campeao_se_melhor
+            from src.config.config_manager import atualizar_campeao_se_melhor, salvar_melhor_configuracao
             melhor_g, _, _, melhor_c_id = ranking[0]
             melhor_cfg = configuracoes[melhor_c_id]
-            atualizou = atualizar_campeao_se_melhor(
-                "queimada",
-                melhor_cfg,
-                melhor_g,
-                origem=f"grid_search_paralelo_{espaco}",
-                detalhes={"total_instancias": len(instancias), "instancias": [f.name for f in instancias]},
-            )
+            if forcar_campeao:
+                atualizou = salvar_melhor_configuracao(
+                    "queimada",
+                    melhor_cfg,
+                    score=melhor_g,
+                    origem=f"grid_search_paralelo_{espaco}",
+                    detalhes={"total_instancias": len(instancias), "instancias": [f.name for f in instancias], "espaco": espaco, "motivo": "forcar_campeao"},
+                )
+            else:
+                atualizou = atualizar_campeao_se_melhor(
+                    "queimada",
+                    melhor_cfg,
+                    melhor_g,
+                    origem=f"grid_search_paralelo_{espaco}",
+                    detalhes={"total_instancias": len(instancias), "instancias": [f.name for f in instancias], "espaco": espaco},
+                )
             if atualizou:
                 print(f"\n🏆 AUTO-UPDATE: Nova melhor configuração da Queimada salva automaticamente (Score: {melhor_g:.2f})!")
             else:
@@ -798,6 +871,8 @@ def executar_grid_search(
         "refinamento",
         "temperatura",
         "dissipacao",
+        "adaptar_regime_r",
+        "velocidade_dinamica",
     ]
 
     for param in parametros_analise:
@@ -825,10 +900,22 @@ def parse_args():
         description="Avaliação e Grid Search Estrutural da Heurística da Queimada no Traveling Thief Problem (TTP)"
     )
     parser.add_argument(
+        "--forcar-campeao",
+        action="store_true",
+        default=False,
+        help="Força a gravação da configuração campeã no config_manager.py mesmo se a escala numérica anterior for diferente.",
+    )
+    parser.add_argument(
+        "--sem-poda",
+        action="store_true",
+        default=False,
+        help="Desativa a poda de configurações redundantes/incompatíveis e testa o produto cartesiano irrestrito.",
+    )
+    parser.add_argument(
         "--espaco",
-        choices=["completo", "direcionado", "padrao", "rapido"],
+        choices=["completo", "direcionado", "padrao", "rapido", "estagio1", "estagio2"],
         default="completo",
-        help="Espaço de configurações: 'completo' (unificado com métodos direcionados), 'direcionado' (apenas backward/forward direcionadas), 'padrao' (288), ou 'rapido' (sem 2-opt/Drop&Add).",
+        help="Espaço de configurações: 'estagio1' (16 - Rota e Campo Térmico), 'estagio2' (4 - Coleta e Velocidade Marginal), 'completo' (unificado), 'direcionado' (backward/forward direcionadas), 'padrao' (288), ou 'rapido' (sem 2-opt/Drop&Add).",
     )
     parser.add_argument(
         "--instancias",
@@ -906,4 +993,6 @@ if __name__ == "__main__":
         arquivo_csv=args.csv,
         max_ram_mb=args.max_ram_mb,
         tamanho_lote=args.lote,
+        deduplicar=not args.sem_poda,
+        forcar_campeao=args.forcar_campeao,
     )

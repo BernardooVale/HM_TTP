@@ -1,22 +1,62 @@
 {
   "queimada": {
     "parametros": {
-      "temperatura": "total_value",
+      "temperatura": "knapsack_exact",
       "dissipacao": "dijkstra",
       "direcao": "calor_final",
-      "metodo_construcao": "backward_edges",
+      "metodo_construcao": "backward_directed",
       "afinidade_termica": true,
       "refinamento_rota": true,
       "otimizar_buracos": true,
       "selecao": "greedy_relative",
-      "ordem_selecao": "densidade",
+      "ordem_selecao": "sequencial",
       "refinamento": true,
-      "gamma_afinidade": 1.0,
-      "adaptar_regime_r": false
+      "grafo_direcionado": true,
+      "adaptar_regime_r": false,
+      "velocidade_dinamica": false
     },
-    "score_medio": 768.29,
+    "score_medio": -507025.2228541717,
     "origem": "grid_search_paralelo_completo",
-    "data_atualizacao": "2026-10-29 09:30:00"
+    "data_atualizacao": "2026-11-05 19:25:40",
+    "detalhes": {
+      "total_instancias": 32,
+      "instancias": [
+        "instancia_02.txt",
+        "instancia_01.txt",
+        "cenario_pequeno_10c.txt",
+        "cenario_cluster_15c.txt",
+        "cenario_medio_20c.txt",
+        "cenario_cluster_25c.txt",
+        "cenario_desafiador_30c.txt",
+        "11.ttp",
+        "41.ttp",
+        "289.ttp",
+        "356.ttp",
+        "79.ttp",
+        "363.ttp",
+        "93.ttp",
+        "337.ttp",
+        "413.ttp",
+        "68.ttp",
+        "a280_n279_bounded-strongly-corr_01.ttp",
+        "507.ttp",
+        "464.ttp",
+        "540.ttp",
+        "153.ttp",
+        "131.ttp",
+        "138.ttp",
+        "121.ttp",
+        "128.ttp",
+        "466.ttp",
+        "516.ttp",
+        "423.ttp",
+        "512.ttp",
+        "428.ttp",
+        "493.ttp"
+      ],
+      "espaco": "completo",
+      "motivo": "forcar_campeao"
+    }
   },
   "heuristic_37": {
     "parametros": {
@@ -25,11 +65,14 @@
       "refinamento_rota": true,
       "limiar_simetrico": false,
       "preenchimento_pos": true,
-      "refinamento": true
+      "refinamento": true,
+      "modo_amostragem": "estratificada",
+      "limiar_adaptativo": true,
+      "alpha_adaptativo": 0.75
     },
-    "score_medio": -697950.5900829785,
+    "score_medio": -697950.6575,
     "origem": "grid_search_paralelo_completo",
-    "data_atualizacao": "2026-11-05 09:42:14",
+    "data_atualizacao": "2026-11-05 19:25:31",
     "detalhes": {
       "total_instancias": 32,
       "instancias": [

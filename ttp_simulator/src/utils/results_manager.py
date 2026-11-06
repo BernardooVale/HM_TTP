@@ -87,12 +87,16 @@ MAPA_ARQUIVOS_CANONICO: Dict[str, Path] = {
     "grid_search_37_padrao.csv": DIR_GRID_SEARCH_37 / "grid_search_37_padrao.csv",
     "grid_search_37_rapido.csv": DIR_GRID_SEARCH_37 / "grid_search_37_rapido.csv",
     "grid_search_37_focado.csv": DIR_GRID_SEARCH_37 / "grid_search_37_focado.csv",
+    "grid_search_37_hipoteses.csv": DIR_GRID_SEARCH_37 / "grid_search_37_hipoteses.csv",
+    "grid_search_37_amostragem.csv": DIR_GRID_SEARCH_37 / "grid_search_37_amostragem.csv",
     # Grid Search da Queimada
     "grid_search_queimada.csv": DIR_GRID_SEARCH / "grid_search_queimada.csv",
     "grid_search_queimada_completo.csv": DIR_GRID_SEARCH / "grid_search_queimada_completo.csv",
     "grid_search_queimada_direcionado.csv": DIR_GRID_SEARCH / "grid_search_queimada_direcionado.csv",
     "grid_search_queimada_padrao.csv": DIR_GRID_SEARCH / "grid_search_queimada_padrao.csv",
     "grid_search_queimada_rapido.csv": DIR_GRID_SEARCH / "grid_search_queimada_rapido.csv",
+    "grid_search_queimada_estagio1.csv": DIR_GRID_SEARCH / "grid_search_queimada_estagio1.csv",
+    "grid_search_queimada_estagio2.csv": DIR_GRID_SEARCH / "grid_search_queimada_estagio2.csv",
 }
 
 
@@ -145,6 +149,19 @@ def resolver_caminho_csv(nome_ou_caminho: str, criar_pai: bool = True) -> Path:
         if criar_pai:
             caminho_canonico.parent.mkdir(parents=True, exist_ok=True)
         return caminho_canonico.resolve()
+
+    # Roteamento inteligente automático para novas variações de Grid Search
+    if nome_arquivo.startswith("grid_search_37_") or nome_arquivo.startswith("grid_search_heuristic_37"):
+        caminho = DIR_GRID_SEARCH_37 / nome_arquivo
+        if criar_pai:
+            caminho.parent.mkdir(parents=True, exist_ok=True)
+        return caminho.resolve()
+
+    if nome_arquivo.startswith("grid_search_queimada_"):
+        caminho = DIR_GRID_SEARCH / nome_arquivo
+        if criar_pai:
+            caminho.parent.mkdir(parents=True, exist_ok=True)
+        return caminho.resolve()
 
     if p.parent == RESULTS_DIR or not p.is_absolute():
         caminho = RESULTS_DIR / nome_arquivo

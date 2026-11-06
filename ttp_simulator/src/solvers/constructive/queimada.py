@@ -222,6 +222,7 @@ class QueimadaSolver(BaseSolver):
         afinidade_termica: Optional[bool] = None,
         gamma_afinidade: Optional[float] = None,
         adaptar_regime_r: Optional[bool] = None,
+        velocidade_dinamica: Optional[bool] = None,
         modelo: str = "TTP1",
         otimizar_buracos: Optional[bool] = None,
         grafo_direcionado: Optional[bool] = None,
@@ -231,7 +232,7 @@ class QueimadaSolver(BaseSolver):
         cfg = obter_melhor_configuracao("queimada")
         """
         Parâmetros:
-        - temperatura:              'total_value', 'knapsack_exact', 'knapsack_greedy' (padrão ótimo: 'total_value')
+        - temperatura:              'total_value', 'knapsack_exact', 'knapsack_greedy', 'net_value_depot' (padrão ótimo: 'total_value')
         - dissipacao:               'adjacent_only', 'dijkstra', 'bfs' (padrão ótimo: 'bfs')
         - direcao (ordem de calor): 'calor_final', 'calor_inicio' (padrão ótimo: 'calor_final')
         - selecao:                  'greedy_relative', 'knapsack_relative' (padrão ótimo: 'greedy_relative')
@@ -242,6 +243,7 @@ class QueimadaSolver(BaseSolver):
         - afinidade_termica:        se True, Kruskal prioriza arestas por calor/distância^gamma (padrão: True)
         - gamma_afinidade:          expoente de penalização de distância na afinidade térmica (padrão: 1.0)
         - adaptar_regime_r:         se True, ajusta dinamicamente a afinidade ao valor de R da instância (padrão: False)
+        - velocidade_dinamica:      se True, utiliza cálculo dinâmico de velocidade instantânea e custo marginal exato nas ordens reversa e sequencial (padrão: False)
         - modelo:                   'TTP1' (aluguel de viagem) ou 'TTP2' (degradação temporal) (padrão: 'TTP1')
         - otimizar_buracos:         se True, otimiza segmentos vazios sem coleta pós-mochila via B&B / 2-opt (padrão: False)
         - grafo_direcionado:        se True, modela calor direcionado em arcos (u, v) (padrão: True se backward_directed/forward_directed)
@@ -257,6 +259,11 @@ class QueimadaSolver(BaseSolver):
         self.afinidade_termica = afinidade_termica if afinidade_termica is not None else cfg.get("afinidade_termica", True)
         self.gamma_afinidade = gamma_afinidade if gamma_afinidade is not None else cfg.get("gamma_afinidade", 1.0)
         self.adaptar_regime_r = adaptar_regime_r if adaptar_regime_r is not None else cfg.get("adaptar_regime_r", False)
+        self.velocidade_dinamica = (
+            velocidade_dinamica
+            if velocidade_dinamica is not None
+            else cfg.get("velocidade_dinamica", False)
+        )
         self.otimizar_buracos = otimizar_buracos if otimizar_buracos is not None else cfg.get("otimizar_buracos", True)
         if grafo_direcionado is not None:
             self.grafo_direcionado = grafo_direcionado
@@ -274,7 +281,7 @@ class QueimadaSolver(BaseSolver):
 
     def _calcular_temperaturas(self, instance: TTPInstance) -> Dict[int, float]:
         """Calcula a temperatura inicial de cada vértice com memoização adaptativa."""
-        if self.temperatura_modo not in ("total_value", "knapsack_exact", "knapsack_greedy"):
+        if self.temperatura_modo not in ("total_value", "knapsack_exact", "knapsack_greedy", "net_value_depot"):
             raise ValueError(f"Modo de temperatura inválido: {self.temperatura_modo}")
 
         cache = obter_cache_ram_global()
@@ -299,6 +306,27 @@ class QueimadaSolver(BaseSolver):
             elif self.temperatura_modo == "knapsack_greedy":
                 val, _ = resolver_knapsack_guloso(cidade.itens, instance.capacidade_mochila)
                 temperaturas[cid] = val
+            elif self.temperatura_modo == "net_value_depot":
+                cap_mochila = max(instance.capacidade_mochila, 1e-6)
+                v_max = instance.v_max
+                taxa_aluguel = instance.taxa_aluguel
+                const_deg = max(instance.constante_degradacao, 1e-6)
+                dist_u_1 = instance.grafo.distancia(cid, 1)
+
+                calor_cidade = 0.0
+                for item in cidade.itens:
+                    if item.peso <= 0:
+                        calor_cidade += max(0.0, float(item.valor))
+                        continue
+                    if self.modelo == "TTP2":
+                        tempo_min = dist_u_1 / v_max
+                        c_min = math.ceil(tempo_min / const_deg)
+                    else:
+                        c_min = taxa_aluguel * (dist_u_1 / v_max) * (item.peso / cap_mochila)
+                    lucro_min = item.valor - c_min
+                    if lucro_min > 0:
+                        calor_cidade += lucro_min
+                temperaturas[cid] = calor_cidade
 
         cache.set(cache_key, dict(temperaturas))
         return temperaturas
@@ -515,7 +543,7 @@ class QueimadaSolver(BaseSolver):
 
         gamma = self.gamma_afinidade
         if self.adaptar_regime_r and self.modelo == "TTP1":
-            gamma = min(2.5, max(0.5, 0.5 + instance.taxa_aluguel / 2.0))
+            gamma = min(3.0, max(0.5, 0.8 + 0.4 * instance.taxa_aluguel))
 
         # Caminho acelerado via matriz 2D + Numba JIT + Memoização de Rota Base (pré-orientação)
         if isinstance(calor, np.ndarray) and NUMBA_AVAILABLE and _grafo_eh_denso(instance):
@@ -787,6 +815,7 @@ class QueimadaSolver(BaseSolver):
             rota_tuple,
             self.selecao_modo,
             ordem_efetiva,
+            bool(self.velocidade_dinamica),
             bool(self.refinamento),
             self.modelo,
         )
@@ -801,6 +830,7 @@ class QueimadaSolver(BaseSolver):
             rota_tuple,
             self.selecao_modo,
             ordem_efetiva,
+            bool(self.velocidade_dinamica),
             self.modelo,
         )
         cached_base = cache.get(base_key)
@@ -852,39 +882,126 @@ class QueimadaSolver(BaseSolver):
 
             if self.selecao_modo == "greedy_relative":
                 if self.ordem_selecao == "densidade":
-                    itens_com_lucro.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
                     peso_atual = 0.0
-                    for _, item in itens_com_lucro:
-                        if peso_atual + item.peso <= instance.capacidade_mochila:
-                            peso_atual += item.peso
-                            if item.cidade_origem not in plano_coleta:
-                                plano_coleta[item.cidade_origem] = []
-                            plano_coleta[item.cidade_origem].append(item.id)
-                elif self.ordem_selecao in ("reversa", "sequencial"):
-                    por_cidade: Dict[int, List[Tuple[float, Item]]] = {}
-                    for par in itens_com_lucro:
-                        cid = par[1].cidade_origem
-                        if cid not in por_cidade:
-                            por_cidade[cid] = []
-                        por_cidade[cid].append(par)
+                    if self.velocidade_dinamica:
+                        def vel_exata(peso: float) -> float:
+                            return max(
+                                instance.v_min,
+                                instance.v_max - peso * ((instance.v_max - instance.v_min) / cap_mochila),
+                            )
 
+                        def calcular_lucro_marginal_dinamico(it: Item, peso_moch: float, d_r: float) -> float:
+                            if it.peso <= 0:
+                                return it.valor
+                            if self.modelo == "TTP2":
+                                v_depois = vel_exata(peso_moch + it.peso)
+                                tempo_rest = d_r / v_depois
+                                degrad = math.ceil(tempo_rest / const_deg)
+                                return it.valor - degrad
+                            else:
+                                v_antes = vel_exata(peso_moch)
+                                v_depois = vel_exata(peso_moch + it.peso)
+                                delta_t = d_r * (1.0 / v_depois - 1.0 / v_antes)
+                                custo_t = instance.taxa_aluguel * delta_t
+                                return it.valor - custo_t
+
+                        itens_candidatos = sorted(
+                            instance.itens,
+                            key=lambda it: it.valor / it.peso if it.peso > 0 else float("inf"),
+                            reverse=True,
+                        )
+                        for item in itens_candidatos:
+                            if item.peso <= 0:
+                                continue
+                            if peso_atual + item.peso <= instance.capacidade_mochila:
+                                d_r = dist_restante.get(item.cidade_origem, 0.0)
+                                lucro_m = calcular_lucro_marginal_dinamico(item, peso_atual, d_r)
+                                if lucro_m > 0:
+                                    peso_atual += item.peso
+                                    if item.cidade_origem not in plano_coleta:
+                                        plano_coleta[item.cidade_origem] = []
+                                    plano_coleta[item.cidade_origem].append(item.id)
+                    else:
+                        itens_com_lucro.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
+                        for _, item in itens_com_lucro:
+                            if peso_atual + item.peso <= instance.capacidade_mochila:
+                                peso_atual += item.peso
+                                if item.cidade_origem not in plano_coleta:
+                                    plano_coleta[item.cidade_origem] = []
+                                plano_coleta[item.cidade_origem].append(item.id)
+                elif self.ordem_selecao in ("reversa", "sequencial"):
                     cidades_iter = (
                         [c for c in reversed(rota) if c != 1]
                         if self.ordem_selecao == "reversa"
                         else [c for c in rota if c != 1]
                     )
                     peso_atual = 0.0
-                    for cid in cidades_iter:
-                        itens_cid = por_cidade.get(cid)
-                        if not itens_cid:
-                            continue
-                        itens_cid.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
-                        for _, item in itens_cid:
-                            if peso_atual + item.peso <= instance.capacidade_mochila:
-                                peso_atual += item.peso
-                                if cid not in plano_coleta:
-                                    plano_coleta[cid] = []
-                                plano_coleta[cid].append(item.id)
+
+                    if self.velocidade_dinamica:
+                        def vel_exata(peso: float) -> float:
+                            return max(
+                                instance.v_min,
+                                instance.v_max - peso * ((instance.v_max - instance.v_min) / cap_mochila),
+                            )
+
+                        def calcular_lucro_marginal_dinamico(it: Item, peso_moch: float, d_r: float) -> float:
+                            if it.peso <= 0:
+                                return it.valor
+                            if self.modelo == "TTP2":
+                                v_depois = vel_exata(peso_moch + it.peso)
+                                tempo_rest = d_r / v_depois
+                                degrad = math.ceil(tempo_rest / const_deg)
+                                return it.valor - degrad
+                            else:
+                                v_antes = vel_exata(peso_moch)
+                                v_depois = vel_exata(peso_moch + it.peso)
+                                delta_t = d_r * (1.0 / v_depois - 1.0 / v_antes)
+                                custo_t = instance.taxa_aluguel * delta_t
+                                return it.valor - custo_t
+
+                        por_cidade_itens: Dict[int, List[Item]] = {}
+                        for cid in cidades_iter:
+                            cidade = instance.grafo.cidades.get(cid)
+                            if cidade and cidade.itens:
+                                itens_ordenados = sorted(
+                                    cidade.itens,
+                                    key=lambda it: it.valor / it.peso if it.peso > 0 else float("inf"),
+                                    reverse=True,
+                                )
+                                por_cidade_itens[cid] = itens_ordenados
+
+                        for cid in cidades_iter:
+                            itens_cid = por_cidade_itens.get(cid)
+                            if not itens_cid:
+                                continue
+                            d_r = dist_restante.get(cid, 0.0)
+                            for item in itens_cid:
+                                if peso_atual + item.peso <= instance.capacidade_mochila:
+                                    lucro_m = calcular_lucro_marginal_dinamico(item, peso_atual, d_r)
+                                    if lucro_m > 0:
+                                        peso_atual += item.peso
+                                        if cid not in plano_coleta:
+                                            plano_coleta[cid] = []
+                                        plano_coleta[cid].append(item.id)
+                    else:
+                        por_cidade: Dict[int, List[Tuple[float, Item]]] = {}
+                        for par in itens_com_lucro:
+                            cid = par[1].cidade_origem
+                            if cid not in por_cidade:
+                                por_cidade[cid] = []
+                            por_cidade[cid].append(par)
+
+                        for cid in cidades_iter:
+                            itens_cid = por_cidade.get(cid)
+                            if not itens_cid:
+                                continue
+                            itens_cid.sort(key=lambda x: x[0] / x[1].peso, reverse=True)
+                            for _, item in itens_cid:
+                                if peso_atual + item.peso <= instance.capacidade_mochila:
+                                    peso_atual += item.peso
+                                    if cid not in plano_coleta:
+                                        plano_coleta[cid] = []
+                                    plano_coleta[cid].append(item.id)
 
             elif self.selecao_modo == "knapsack_relative":
                 itens_adaptados = [
@@ -1271,5 +1388,28 @@ SolverRegistry.register(
                 nome="queimada_forward_direcionada_sem_2opt_buracos",
             ),
         },
+    )
+)
+
+# Novas variantes: Cota de Lucro Geodésica, Velocidade Marginal Dinâmica e Estágio 1
+SolverRegistry.register(
+    type(
+        "QueimadaNetValueSolver",
+        (QueimadaSolver,),
+        {"nome": "queimada_net_value", "__init__": lambda self: QueimadaSolver.__init__(self, temperatura="net_value_depot", nome="queimada_net_value")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaVelocidadeDinamicaSolver",
+        (QueimadaSolver,),
+        {"nome": "queimada_velocidade_dinamica", "__init__": lambda self: QueimadaSolver.__init__(self, ordem_selecao="reversa", velocidade_dinamica=True, nome="queimada_velocidade_dinamica")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaEstagio1Solver",
+        (QueimadaSolver,),
+        {"nome": "queimada_estagio1", "__init__": lambda self: QueimadaSolver.__init__(self, temperatura="net_value_depot", metodo_construcao="backward_edges", adaptar_regime_r=True, otimizar_buracos=True, nome="queimada_estagio1")},
     )
 )

@@ -1,5 +1,6 @@
 import math
-from typing import Dict, List, Optional
+import random
+from typing import Dict, List, Optional, Set, Tuple
 from src.core.models import TTPInstance, SolucaoTTP, Item, Grafo
 from src.solvers.base import BaseSolver, SolverRegistry
 from src.config.config_manager import obter_melhor_configuracao
@@ -21,7 +22,10 @@ class Heuristic37Solver(BaseSolver):
     - Avalia os itens na ordem sequencial da rota (ordem de chegada/descoberta).
     - Utiliza o custo marginal real de transporte (distância restante até a cidade 1).
     - Observa os primeiros 37% dos itens para calibrar o limiar de qualidade (benchmark).
-    - A partir dos 37%, seleciona itens que superem esse benchmark enquanto couber na mochila.
+    - Suporta estratégias de amostragem não-espacial: 'estratificada' (por quartis de d_rest),
+      'aleatoria' (amostragem uniforme pura) e 'rota' (legada ao longo dos primeiros 37% do TSP).
+    - Suporta limiar dinâmico adaptativo decrescente (Knapsack Secretary): L(W) = L0 * (W_rest / C)^alpha.
+    - A partir da observação, seleciona itens que superem esse benchmark enquanto couber na mochila.
     - Opcionalmente realiza preenchimento guloso pós-secretária e refinamento Drop & Add (PackIterative).
     """
 
@@ -33,6 +37,9 @@ class Heuristic37Solver(BaseSolver):
         metodo_tsp: Optional[str] = None,
         refinamento_rota: Optional[bool] = None,
         preenchimento_pos: Optional[bool] = None,
+        modo_amostragem: Optional[str] = None,
+        limiar_adaptativo: Optional[bool] = None,
+        alpha_adaptativo: Optional[float] = None,
         modelo: str = "TTP1",
         nome: Optional[str] = None,
     ):
@@ -43,6 +50,11 @@ class Heuristic37Solver(BaseSolver):
         self.metodo_tsp = metodo_tsp if metodo_tsp is not None else cfg.get("metodo_tsp", "melhor")
         self.refinamento_rota = refinamento_rota if refinamento_rota is not None else cfg.get("refinamento_rota", False)
         self.preenchimento_pos = preenchimento_pos if preenchimento_pos is not None else cfg.get("preenchimento_pos", True)
+        self.modo_amostragem = modo_amostragem if modo_amostragem is not None else cfg.get("modo_amostragem", "estratificada")
+        self.limiar_adaptativo = limiar_adaptativo if limiar_adaptativo is not None else cfg.get("limiar_adaptativo", True)
+        self.alpha_adaptativo = alpha_adaptativo if alpha_adaptativo is not None else cfg.get("alpha_adaptativo", 0.75)
+        if self.modo_amostragem not in ("rota", "aleatoria", "estratificada"):
+            raise ValueError(f"Modo de amostragem inválido: {self.modo_amostragem}")
         self.modelo = modelo
         self._nome = nome or "heuristic_37"
 
@@ -121,41 +133,99 @@ class Heuristic37Solver(BaseSolver):
             itens_sequenciais.extend(cidade.itens)
 
         m = len(itens_sequenciais)
-        limite_calibracao = max(1, int(self.taxa_amostragem * m)) if m > 0 else 0
-        itens_calibracao = itens_sequenciais[:limite_calibracao]
-        itens_coleta = itens_sequenciais[limite_calibracao:]
+        if m == 0:
+            return SolucaoTTP(rota=rota, plano_coleta={})
 
-        # Fase de calibração: observa os scores intrínsecos dos primeiros itens da amostragem (avaliados em mochila vazia)
-        scores_calibracao = [calcular_score(item, 0.0) for item in itens_calibracao]
-        melhor_threshold = max(scores_calibracao) if scores_calibracao else 0.0
-        limiar = max(melhor_threshold, 0.0)
+        itens_coleta: List[Tuple[Item, float]] = []
+
+        if self.modo_amostragem == "rota":
+            # Modo legado: primeiros 37% ao longo da rota TSP
+            limite_calibracao = max(1, int(self.taxa_amostragem * m))
+            itens_calibracao = itens_sequenciais[:limite_calibracao]
+            scores_calibracao = [calcular_score(item, 0.0) for item in itens_calibracao]
+            limiar_base = max(0.0, max(scores_calibracao)) if scores_calibracao else 0.0
+            itens_coleta = [(item, limiar_base) for item in itens_sequenciais[limite_calibracao:]]
+
+        elif self.modo_amostragem == "aleatoria":
+            # Amostragem desacoplada da rota (amostragem aleatória uniforme com seed estável)
+            qtd_amostra = max(1, int(self.taxa_amostragem * m))
+            rng = random.Random(42)
+            indices_amostra = set(rng.sample(range(m), qtd_amostra))
+            itens_calibracao = [itens_sequenciais[i] for i in indices_amostra]
+            scores_calibracao = [calcular_score(item, 0.0) for item in itens_calibracao]
+            limiar_base = max(0.0, max(scores_calibracao)) if scores_calibracao else 0.0
+            itens_coleta = [
+                (item, limiar_base)
+                for i, item in enumerate(itens_sequenciais)
+                if i not in indices_amostra
+            ]
+
+        elif self.modo_amostragem == "estratificada":
+            # Modo Estratificado: divide a rota em 4 quartis de distância ao depósito e calibra limiares independentes por quartil
+            d_max = max(distancias_restantes.values()) if distancias_restantes else 1.0
+            if d_max <= 0:
+                d_max = 1.0
+
+            itens_por_quartil: Dict[int, List[Item]] = {q: [] for q in range(4)}
+            for item in itens_sequenciais:
+                d_r = distancias_restantes.get(item.cidade_origem, 0.0)
+                norm = d_r / d_max
+                q = min(3, max(0, int(norm * 4)))
+                itens_por_quartil[q].append(item)
+
+            limiar_quartil: Dict[int, float] = {}
+            calibracao_ids: Set[int] = set()
+
+            for q in range(4):
+                itens_q = itens_por_quartil[q]
+                m_q = len(itens_q)
+                if m_q > 0:
+                    limite_q = max(1, int(self.taxa_amostragem * m_q))
+                    amostra_q = itens_q[:limite_q]
+                    for it in amostra_q:
+                        calibracao_ids.add(it.id)
+                    scores_q = [calcular_score(it, 0.0) for it in amostra_q]
+                    limiar_quartil[q] = max(0.0, max(scores_q)) if scores_q else 0.0
+                else:
+                    limiar_quartil[q] = 0.0
+
+            for item in itens_sequenciais:
+                if item.id not in calibracao_ids:
+                    d_r = distancias_restantes.get(item.cidade_origem, 0.0)
+                    norm = d_r / d_max
+                    q = min(3, max(0, int(norm * 4)))
+                    itens_coleta.append((item, limiar_quartil[q]))
 
         # Fase de decisão/coleta da secretária:
         peso_atual = 0.0
         plano_coleta: Dict[int, List[int]] = {}
         itens_coletados_ids = set()
 
-        for item in itens_coleta:
+        for item, limiar_base in itens_coleta:
             if peso_atual + item.peso <= instance.capacidade_mochila:
-                if self.limiar_simetrico:
-                    # Modo Simétrico: compara score intrínseco (mochila vazia) com o limiar
-                    score_intrinseco = calcular_score(item, 0.0)
-                    lucro_marginal = calcular_lucro_marginal(item, peso_atual)
-                    if score_intrinseco > limiar and lucro_marginal > 0:
-                        peso_atual += item.peso
-                        itens_coletados_ids.add(item.id)
-                        if item.cidade_origem not in plano_coleta:
-                            plano_coleta[item.cidade_origem] = []
-                        plano_coleta[item.cidade_origem].append(item.id)
+                # Limiar dinâmico adaptativo decrescente (Knapsack Secretary): L(W) = L0 * (W_rest / C)^alpha
+                if self.limiar_adaptativo:
+                    w_rest = max(0.0, instance.capacidade_mochila - peso_atual)
+                    fator_adaptativo = (w_rest / cap_mochila) ** self.alpha_adaptativo
+                    limiar_efetivo = limiar_base * fator_adaptativo
                 else:
-                    # Modo Padrão: avalia score dinâmico dependente do peso acumulado
+                    limiar_efetivo = limiar_base
+
+                lucro_marginal = calcular_lucro_marginal(item, peso_atual)
+                if lucro_marginal <= 0:
+                    continue
+
+                if self.limiar_simetrico:
+                    score = calcular_score(item, 0.0)
+                else:
                     score = calcular_score(item, peso_atual)
-                    if score > limiar:
-                        peso_atual += item.peso
-                        itens_coletados_ids.add(item.id)
-                        if item.cidade_origem not in plano_coleta:
-                            plano_coleta[item.cidade_origem] = []
-                        plano_coleta[item.cidade_origem].append(item.id)
+
+                if score > limiar_efetivo:
+                    peso_atual += item.peso
+                    itens_coletados_ids.add(item.id)
+                    if item.cidade_origem not in plano_coleta:
+                        plano_coleta[item.cidade_origem] = []
+                    plano_coleta[item.cidade_origem].append(item.id)
 
         # 5. Preenchimento guloso pós-secretária:
         if self.preenchimento_pos:
@@ -220,5 +290,26 @@ SolverRegistry.register(
         "Heuristic37SemRefinamentoSolver",
         (Heuristic37Solver,),
         {"nome": "heuristic_37_sem_refinamento", "__init__": lambda self: Heuristic37Solver.__init__(self, refinamento=False, nome="heuristic_37_sem_refinamento")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "Heuristic37EstratificadaSolver",
+        (Heuristic37Solver,),
+        {"nome": "heuristic_37_estratificada", "__init__": lambda self: Heuristic37Solver.__init__(self, modo_amostragem="estratificada", limiar_adaptativo=True, nome="heuristic_37_estratificada")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "Heuristic37AleatoriaSolver",
+        (Heuristic37Solver,),
+        {"nome": "heuristic_37_aleatoria", "__init__": lambda self: Heuristic37Solver.__init__(self, modo_amostragem="aleatoria", limiar_adaptativo=True, nome="heuristic_37_aleatoria")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "Heuristic37AdaptativaSolver",
+        (Heuristic37Solver,),
+        {"nome": "heuristic_37_adaptativa", "__init__": lambda self: Heuristic37Solver.__init__(self, limiar_adaptativo=True, nome="heuristic_37_adaptativa")},
     )
 )

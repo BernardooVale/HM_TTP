@@ -109,6 +109,9 @@ def _executar_uma_tarefa(
         metodo_tsp=metodo_tsp,
         refinamento_rota=ref_rota,
         preenchimento_pos=cfg.get("preenchimento_pos", True),
+        modo_amostragem=cfg.get("modo_amostragem", "estratificada"),
+        limiar_adaptativo=cfg.get("limiar_adaptativo", True),
+        alpha_adaptativo=cfg.get("alpha_adaptativo", 0.75),
         modelo=modelo,
     )
 
@@ -149,6 +152,9 @@ DEFAULTS_PARAMETROS_37: Dict[str, Any] = {
     "limiar_simetrico": False,
     "preenchimento_pos": True,
     "refinamento": True,
+    "modo_amostragem": "estratificada",
+    "limiar_adaptativo": True,
+    "alpha_adaptativo": 0.75,
 }
 
 
@@ -182,6 +188,9 @@ def _chave_ordenacao_config(cfg: Dict[str, Any]) -> Tuple:
     return (
         cfg.get("metodo_tsp", ""),
         bool(cfg.get("refinamento_rota", False)),
+        cfg.get("modo_amostragem", "estratificada"),
+        bool(cfg.get("limiar_adaptativo", True)),
+        float(cfg.get("alpha_adaptativo", 0.75)),
         float(cfg.get("taxa_amostragem", 0.37)),
         bool(cfg.get("limiar_simetrico", False)),
         bool(cfg.get("preenchimento_pos", True)),
@@ -209,6 +218,9 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "padrao") -> List[Dict[str, An
                 "limiar_simetrico": limiar,
                 "preenchimento_pos": True,
                 "refinamento": ref,
+                "modo_amostragem": "estratificada",
+                "limiar_adaptativo": True,
+                "alpha_adaptativo": 0.75,
             })
         return configs
 
@@ -231,6 +243,9 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "padrao") -> List[Dict[str, An
                 "limiar_simetrico": limiar,
                 "preenchimento_pos": preench,
                 "refinamento": ref,
+                "modo_amostragem": "estratificada",
+                "limiar_adaptativo": True,
+                "alpha_adaptativo": 0.75,
             })
         return configs
 
@@ -248,6 +263,9 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "padrao") -> List[Dict[str, An
                 "limiar_simetrico": limiar,
                 "preenchimento_pos": preench,
                 "refinamento": False,
+                "modo_amostragem": "estratificada",
+                "limiar_adaptativo": True,
+                "alpha_adaptativo": 0.75,
             })
         return configs
 
@@ -265,11 +283,55 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "padrao") -> List[Dict[str, An
                 "limiar_simetrico": limiar,
                 "preenchimento_pos": True,
                 "refinamento": ref,
+                "modo_amostragem": "estratificada",
+                "limiar_adaptativo": True,
+                "alpha_adaptativo": 0.75,
+            })
+        return configs
+
+    elif tipo_espaco == "hipoteses":
+        # 24 combinações para testar as novas hipóteses de amostragem e limiar adaptativo
+        modos = ["rota", "aleatoria", "estratificada"]
+        limiares_adapt = [False, True]
+        simetricos = [False, True]
+        refinamentos = [False, True]
+        configs = []
+        for modo, adapt, sim, ref in itertools.product(modos, limiares_adapt, simetricos, refinamentos):
+            configs.append({
+                "taxa_amostragem": 0.37,
+                "metodo_tsp": "melhor",
+                "refinamento_rota": True,
+                "limiar_simetrico": sim,
+                "preenchimento_pos": True,
+                "refinamento": ref,
+                "modo_amostragem": modo,
+                "limiar_adaptativo": adapt,
+                "alpha_adaptativo": 0.75,
+            })
+        return configs
+
+    elif tipo_espaco == "amostragem":
+        # 18 combinações comparando modos de amostragem sob diferentes taxas
+        modos = ["rota", "aleatoria", "estratificada"]
+        taxas = [0.25, 0.37, 0.50]
+        adaptativos = [False, True]
+        configs = []
+        for modo, taxa, adapt in itertools.product(modos, taxas, adaptativos):
+            configs.append({
+                "taxa_amostragem": taxa,
+                "metodo_tsp": "melhor",
+                "refinamento_rota": True,
+                "limiar_simetrico": False,
+                "preenchimento_pos": True,
+                "refinamento": True,
+                "modo_amostragem": modo,
+                "limiar_adaptativo": adapt,
+                "alpha_adaptativo": 0.75,
             })
         return configs
 
     else:
-        raise ValueError(f"Espaço desconhecido: '{tipo_espaco}'. Escolha entre: 'padrao', 'completo', 'rapido', 'focado'.")
+        raise ValueError(f"Espaço desconhecido: '{tipo_espaco}'. Escolha entre: 'padrao', 'completo', 'rapido', 'focado', 'hipoteses', 'amostragem'.")
 
 
 def resolver_instancias(
@@ -393,7 +455,7 @@ def executar_grid_search(
 
     # Define caminho canônico de saída do CSV
     if arquivo_csv is None:
-        arquivo_csv_path = resolver_caminho_csv(f"grid_search_37_{espaco}.csv")
+        arquivo_csv_path = resolver_caminho_csv("grid_search_37_completo.csv")
     else:
         arquivo_csv_path = resolver_caminho_csv(arquivo_csv)
 
@@ -648,6 +710,8 @@ def executar_grid_search(
         "limiar_simetrico",
         "preenchimento_pos",
         "refinamento",
+        "modo_amostragem",
+        "limiar_adaptativo",
     ]
 
     for param in parametros_analise:
@@ -675,9 +739,9 @@ def parse_args():
     )
     parser.add_argument(
         "--espaco",
-        choices=["padrao", "completo", "rapido", "focado"],
+        choices=["padrao", "completo", "rapido", "focado", "hipoteses", "amostragem"],
         default="padrao",
-        help="Espaço de configurações: 'padrao' (48), 'completo' (288), 'rapido' (12) ou 'focado' (36).",
+        help="Espaço de configurações: 'padrao' (48), 'completo' (288), 'rapido' (12), 'focado' (36), 'hipoteses' (24) ou 'amostragem' (18).",
     )
     parser.add_argument(
         "--instancias",

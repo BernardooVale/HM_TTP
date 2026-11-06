@@ -301,3 +301,124 @@ def test_heuristic_37_grid_search_spaces():
 
     focado = gerar_espaco_configuracoes("focado")
     assert len(focado) == 36
+
+
+def test_heuristic_37_sampling_and_adaptive_threshold(sample_instance):
+    from src.solvers.constructive.heuristic_37 import Heuristic37Solver
+
+    for modo in ["rota", "aleatoria", "estratificada"]:
+        for adaptativo in [True, False]:
+            solver = Heuristic37Solver(
+                modo_amostragem=modo,
+                limiar_adaptativo=adaptativo,
+                alpha_adaptativo=0.8,
+                refinamento=False,
+            )
+            sol = solver.solve(sample_instance)
+            assert len(sol.rota) == 4
+            assert sol.rota[0] == 1
+            assert set(sol.rota) == {1, 2, 3, 4}
+            peso_total = sum(
+                sample_instance.itens[it_id - 1].peso
+                for it_ids in sol.plano_coleta.values()
+                for it_id in it_ids
+            )
+            assert peso_total <= sample_instance.capacidade_mochila
+
+
+def test_heuristic_37_registered_new_variants(sample_instance):
+    from src.solvers.base import SolverRegistry
+
+    for nome_solver in [
+        "heuristic_37_estratificada",
+        "heuristic_37_aleatoria",
+        "heuristic_37_adaptativa",
+    ]:
+        assert nome_solver in SolverRegistry.listar()
+        solver = SolverRegistry.get(nome_solver)
+        sol = solver.solve(sample_instance)
+        assert len(sol.rota) == 4
+        assert sol.rota[0] == 1
+        assert set(sol.rota) == {1, 2, 3, 4}
+        peso_total = sum(
+            sample_instance.itens[it_id - 1].peso
+            for it_ids in sol.plano_coleta.values()
+            for it_id in it_ids
+        )
+        assert peso_total <= sample_instance.capacidade_mochila
+
+
+def test_heuristic_37_new_grid_spaces():
+    from scripts.experimentos_37.grid_search_paralelo import gerar_espaco_configuracoes
+
+    hipoteses = gerar_espaco_configuracoes("hipoteses")
+    assert len(hipoteses) == 24
+
+    amostragem = gerar_espaco_configuracoes("amostragem")
+    assert len(amostragem) == 18
+
+
+def test_queimada_new_hypotheses_features(sample_instance):
+    from src.solvers.constructive.queimada import QueimadaSolver
+
+    # 1. Temperatura com cota de lucro geodésica ao depósito (net_value_depot)
+    solver_nv = QueimadaSolver(
+        temperatura="net_value_depot",
+        metodo_construcao="backward_edges",
+        adaptar_regime_r=True,
+    )
+    sol_nv = solver_nv.solve(sample_instance)
+    assert len(sol_nv.rota) == 4
+    assert sol_nv.rota[0] == 1
+    assert set(sol_nv.rota) == {1, 2, 3, 4}
+
+    # 2. Velocidade marginal dinâmica sob ordem reversa e sequencial
+    for ordem in ["reversa", "sequencial"]:
+        solver_vd = QueimadaSolver(
+            selecao="greedy_relative",
+            ordem_selecao=ordem,
+            velocidade_dinamica=True,
+            refinamento=False,
+        )
+        sol_vd = solver_vd.solve(sample_instance)
+        assert len(sol_vd.rota) == 4
+        assert sol_vd.rota[0] == 1
+        assert set(sol_vd.rota) == {1, 2, 3, 4}
+        peso = sum(
+            sample_instance.itens[it_id - 1].peso
+            for it_ids in sol_vd.plano_coleta.values()
+            for it_id in it_ids
+        )
+        assert peso <= sample_instance.capacidade_mochila
+
+
+def test_queimada_registered_new_variants(sample_instance):
+    from src.solvers.base import SolverRegistry
+
+    for nome_solver in [
+        "queimada_net_value",
+        "queimada_velocidade_dinamica",
+        "queimada_estagio1",
+    ]:
+        assert nome_solver in SolverRegistry.listar()
+        solver = SolverRegistry.get(nome_solver)
+        sol = solver.solve(sample_instance)
+        assert len(sol.rota) == 4
+        assert sol.rota[0] == 1
+        assert set(sol.rota) == {1, 2, 3, 4}
+        peso = sum(
+            sample_instance.itens[it_id - 1].peso
+            for it_ids in sol.plano_coleta.values()
+            for it_id in it_ids
+        )
+        assert peso <= sample_instance.capacidade_mochila
+
+
+def test_queimada_stage_grid_search_spaces():
+    from scripts.experimentos_queimada.grid_search_paralelo import gerar_espaco_configuracoes
+
+    estagio1 = gerar_espaco_configuracoes("estagio1")
+    assert len(estagio1) == 16
+
+    estagio2 = gerar_espaco_configuracoes("estagio2")
+    assert len(estagio2) == 6
