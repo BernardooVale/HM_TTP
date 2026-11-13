@@ -5,9 +5,6 @@ import numpy as np
 
 from src.core.models import Grafo
 
-# DOCUMENTAR
-
-
 Edge = tuple[int, int]
 
 
