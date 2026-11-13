@@ -1,13 +1,14 @@
 import math
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
 from src.core.models import Grafo, Tour
+from src.solvers.tsp.cheapest_insertion import CheapInsertionRegret
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -58,6 +59,8 @@ class LKLocalSearch:
         # Candidatos ara fechar o tour (t_4)
 
         for node in closeness_candidates:
+            if node == 0:
+                continue
             y_i = self.make_pair(t2i, node)
             G_i = gain - self.dist_mtx[self.make_pair(t2i, node)]
             if G_i <= 0 or y_i in broken or tour.contains(y_i):
@@ -287,10 +290,11 @@ class DoubleBridge(TourKicker):
         tour: Tour,
         first_edge_sample_size: float = 0.1,
     ):
-        candidates_size = tour.length - 1
+        sample_count = max(1, int(first_edge_sample_size * tour.length))
+        sample_count = min(sample_count, len(tour.order))
         candidate_list = np.random.choice(
-            candidates_size,
-            size=int(first_edge_sample_size * candidates_size),
+            tour.order,
+            size=sample_count,
             replace=False,
         )
         if len(candidate_list) == 0:
@@ -309,6 +313,7 @@ class DoubleBridge(TourKicker):
         best_candidate = None
         max_potential = -math.inf
         for candidate in candidates:
+            candidate = int(candidate)
             next_node = tour.next(candidate)
             closest_node = grafo.pre_calculate_closest_nodes(
                 num_closest=20
@@ -340,12 +345,36 @@ class DoubleBridge(TourKicker):
             num_closest=20
         ).get(best_candidate, [None])[:num_candidates]
         for node in closest_node_list:
-            if node not in added_nodes and tour.next(node) not in added_nodes:
+            if (
+                node is not None
+                and node != 0
+                and node not in added_nodes
+                and tour.next(node) not in added_nodes
+            ):
                 next_node = tour.next(node)
                 edges_to_delete.append((int(node), int(next_node)))
                 added_nodes += [int(node), int(next_node)]
             if len(edges_to_delete) == 4:
                 break
+
+        # Fallback: se os num_candidates mais próximos não fornecerem 4 arestas disjuntas,
+        # completa com outros nós do tour em ordem aleatória
+        if len(edges_to_delete) < 4:
+            remaining_nodes = [
+                int(n) for n in tour.order if int(n) not in added_nodes
+            ]
+            np.random.shuffle(remaining_nodes)
+            for node in remaining_nodes:
+                if (
+                    node not in added_nodes
+                    and tour.next(node) not in added_nodes
+                ):
+                    next_node = tour.next(node)
+                    edges_to_delete.append((int(node), int(next_node)))
+                    added_nodes += [int(node), int(next_node)]
+                if len(edges_to_delete) == 4:
+                    break
+
         sorted_deleted_edges = sorted(
             edges_to_delete,
             key=lambda e: tour.pos[e[0]],
@@ -375,7 +404,7 @@ class DoubleBridge(TourKicker):
             for i in range(len(new_tour))
         )
 
-        return Tour(order=new_tour, cost=new_cost)
+        return Tour(order=new_tour, cost=float(new_cost))
 
     def kick(
         self,
@@ -387,3 +416,47 @@ class DoubleBridge(TourKicker):
             best_candidate, tour=tour, grafo=grafo
         )
         return self.execute_double_bridge(delete_edges, tour=tour, grafo=grafo)
+
+
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+class ChainedLK:
+    """
+    Orquestrador do Chained Lin-Kernighan Heuristic (CLKH):
+    1. Constrói tour inicial via CheapInsertionRegret (se não fornecido).
+    2. Refina com LKLocalSearch.
+    3. Aplica perturbações DoubleBridge seguidas de LKLocalSearch (Chained LK).
+    4. Normaliza o tour final para iniciar na cidade 1 (depósito do TTP).
+    """
+
+    grafo: Grafo
+    num_tries: int = 5
+    num_kicks: int = 5
+    kicker: Optional[TourKicker] = None
+
+    def __post_init__(self):
+        if self.kicker is None:
+            self.kicker = DoubleBridge()
+
+    def solve(self, initial_tour: Optional[Tour] = None) -> Tour:
+        if initial_tour is None:
+            constructor = CheapInsertionRegret(grafo=self.grafo)
+            tour = constructor.find_regret_insertion()
+        else:
+            tour = deepcopy(initial_tour)
+
+        lk = LKLocalSearch(grafo=self.grafo, num_tries=self.num_tries)
+        best_tour, _ = lk.solve(tour)
+
+        # DoubleBridge exige ao menos 8 vértices para 4 arestas disjuntas
+        if best_tour.length >= 8 and self.num_kicks > 0:
+            for _ in range(self.num_kicks):
+                try:
+                    kicked_tour = self.kicker.kick(best_tour, self.grafo)
+                except ValueError:
+                    continue
+                cand_tour, cand_cost = lk.solve(kicked_tour)
+                if cand_cost < best_tour.cost - 1e-9:
+                    best_tour = cand_tour
+
+        best_tour.normalize_to_city_1()
+        return best_tour
