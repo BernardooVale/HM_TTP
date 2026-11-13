@@ -47,7 +47,7 @@ class CheapInsertionRegret:
         best_insert_cost = np.inf
         best_pos = None
         best_k = None
-        for k in range(self.dist_mtx.shape[0]):
+        for k in range(1, self.dist_mtx.shape[0]):
             if k not in vertex_in_subtour:
                 pos, insert_cost = self.insert_vertex(k)
                 if insert_cost < best_insert_cost:
@@ -84,10 +84,12 @@ class CheapInsertionRegret:
         return int(best_pos), best_deletion_value
 
     def find_regret_insertion(self):
+        self.T = []
+        self.T_dist = 0.0
         k, l = np.unravel_index(self.dist_mtx.argmin(), self.dist_mtx.shape)
         self.T += [int(k), int(l), int(k)]
-        self.T_dist = self.dist_mtx[k, l] + self.dist_mtx[l, k]
-        while len(self.T) <= self.dist_mtx.shape[0]:
+        self.T_dist = float(self.dist_mtx[k, l] + self.dist_mtx[l, k])
+        while len(self.T) < self.dist_mtx.shape[0]:
             # Find the vertex to be added to T that minimizes c(T, k)
             # where c(T,k) is the cost of the cycle inserting new vertex k into k
             # minus the initial cost of the cycle T.
@@ -100,7 +102,7 @@ class CheapInsertionRegret:
             # from the cycle c(T) by removing vertex k from cycle T
             # c(T) - c(T \ {k})
             best_del_pos, best_del_value = self.find_best_deletion((i, j))
-            if best_insert_cost >= best_del_value:
+            if best_insert_cost + 1e-9 >= best_del_value:
                 self.T.insert(best_insert_pos, best_insert_k)
                 self.T_dist += best_insert_cost
             elif best_del_pos is not None:
@@ -114,5 +116,5 @@ class CheapInsertionRegret:
             else:
                 raise ValueError('No valid deletion found.')
 
-        tour = Tour(order=self.T[:-1], cost=self.T_dist)
+        tour = Tour(order=self.T[:-1], cost=float(self.T_dist))
         return tour

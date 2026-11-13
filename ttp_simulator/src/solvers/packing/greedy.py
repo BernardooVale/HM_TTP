@@ -17,16 +17,17 @@ class IGP:
     modelo: str = "TTP1"
 
     def sort_items(self, item_list: List[Item], k, beta, gamma):
+        end_dist_map = getattr(self, "_city_end_dist", None)
         value_dict = {}
         for item in item_list:
-            value_dict[item] = item.valor**k / (
-                (item.peso**beta)
-                * (
-                    self.tour.end_distance(
-                        item.cidade_origem, self.scenario.grafo
-                    )
-                    ** gamma
+            if end_dist_map is not None:
+                d_end = end_dist_map[item.cidade_origem]
+            else:
+                d_end = self.tour.end_distance(
+                    item.cidade_origem, self.scenario.grafo
                 )
+            value_dict[item] = item.valor**k / (
+                (item.peso**beta) * (d_end**gamma)
             )
         sorted_item_list = item_list.copy()
         sorted_item_list = sorted(
@@ -109,11 +110,21 @@ class IGP:
     ):
         # Guardrail para caso de borda sem itens
         if not self.scenario.itens:
+            self.best_k = 1.0
+            self.best_beta = 1.0
+            self.best_gamma = 1.0
+            self.best_delta = 1.0
+            self.best_score = 0.0
+            self.best_packed_items = []
             return {}
 
         evaluator = FastTTPEvaluator(
             self.scenario, self.tour.order, modelo=self.modelo
         )
+        self._city_end_dist = {
+            city_id: self.tour.end_distance(city_id, self.scenario.grafo)
+            for city_id in self.tour.order
+        }
         item_list = self.scenario.itens
         best_score = -math.inf
         best_packed_items: List[Item] = []
@@ -163,7 +174,14 @@ class IGP:
                 delta=best_delta,
                 best_score=best_score,
             )
-            theta -= 0.75
+            theta *= 0.75
+
+        self.best_k = float(best_k)
+        self.best_beta = float(best_beta)
+        self.best_gamma = float(best_gamma)
+        self.best_delta = float(best_delta)
+        self.best_score = float(best_score)
+        self.best_packed_items = best_packed_items
 
         best_pack_dict = self.parse_solution(best_packed_items)
         return best_pack_dict

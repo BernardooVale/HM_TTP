@@ -178,8 +178,12 @@ def processar_qualquer_csv_para_dataset(caminho_csv: Path) -> Tuple[str, int, Li
         k_mod = chaves_lower.get("modelo_ttp") or chaves_lower.get("modelo")
         k_cpu = chaves_lower.get("tempo_computacional_seg") or chaves_lower.get("tempo_cpu_ms")
         k_inst = chaves_lower.get("arquivo_instancia") or chaves_lower.get("instancia")
+        k_tv = chaves_lower.get("tempo_viagem") or chaves_lower.get("tempo_viagem_f") or chaves_lower.get("media_tempo_viagem")
+        k_peso = chaves_lower.get("peso_acumulado") or chaves_lower.get("peso") or chaves_lower.get("media_peso_acumulado")
+        k_ocup = chaves_lower.get("pct_ocupacao_mochila") or chaves_lower.get("ocupacao_mochila") or chaves_lower.get("media_pct_ocupacao_mochila")
+        k_itens = chaves_lower.get("qtd_itens") or chaves_lower.get("qtd_itens_coletados") or chaves_lower.get("media_qtd_itens")
 
-        agrupado = defaultdict(lambda: {"lucros": [], "cpus": []})
+        agrupado = defaultdict(lambda: {"lucros": [], "cpus": [], "tvs": [], "pesos": [], "ocups": [], "itens": []})
         instancias_set = set()
 
         for r in linhas:
@@ -197,6 +201,14 @@ def processar_qualquer_csv_para_dataset(caminho_csv: Path) -> Tuple[str, int, Li
                     if "seg" in k_cpu.lower():
                         val_cpu *= 1000.0
                     agrupado[(mod, solv)]["cpus"].append(val_cpu)
+                if k_tv and r.get(k_tv) not in (None, ""):
+                    agrupado[(mod, solv)]["tvs"].append(float(r[k_tv]))
+                if k_peso and r.get(k_peso) not in (None, ""):
+                    agrupado[(mod, solv)]["pesos"].append(float(r[k_peso]))
+                if k_ocup and r.get(k_ocup) not in (None, ""):
+                    agrupado[(mod, solv)]["ocups"].append(float(r[k_ocup]))
+                if k_itens and r.get(k_itens) not in (None, ""):
+                    agrupado[(mod, solv)]["itens"].append(float(r[k_itens]))
             except (ValueError, KeyError):
                 continue
 
@@ -204,6 +216,10 @@ def processar_qualquer_csv_para_dataset(caminho_csv: Path) -> Tuple[str, int, Li
         for (mod, solv), d in agrupado.items():
             st = calcular_metricas_lista(d["lucros"])
             cpu_med = (sum(d["cpus"]) / len(d["cpus"])) if d["cpus"] else 1.0
+            tv_med = (sum(d["tvs"]) / len(d["tvs"])) if d["tvs"] else 0.0
+            peso_med = (sum(d["pesos"]) / len(d["pesos"])) if d["pesos"] else 0.0
+            ocup_med = (sum(d["ocups"]) / len(d["ocups"])) if d["ocups"] else 0.0
+            itens_med = (sum(d["itens"]) / len(d["itens"])) if d["itens"] else 0.0
             dados_brutos.append({
                 "modelo": mod,
                 "solver": solv,
@@ -215,10 +231,10 @@ def processar_qualquer_csv_para_dataset(caminho_csv: Path) -> Tuple[str, int, Li
                 "q3_G": f"{st['q3']:.4f}",
                 "max_G": f"{st['max']:.4f}",
                 "media_tempo_cpu_ms": f"{cpu_med:.2f}",
-                "media_tempo_viagem": "0.0",
-                "media_peso_acumulado": "0.0",
-                "media_pct_ocupacao_mochila": "0.0",
-                "media_qtd_itens": "0",
+                "media_tempo_viagem": f"{tv_med:.4f}",
+                "media_peso_acumulado": f"{peso_med:.4f}",
+                "media_pct_ocupacao_mochila": f"{ocup_med:.2f}",
+                "media_qtd_itens": f"{itens_med:.1f}",
             })
 
         dados_norm = normalizar_metricas(dados_brutos)
@@ -1259,6 +1275,10 @@ def gerar_html_dashboard(
         const kMod = headers[headersLower.findIndex(h => h === 'modelo_ttp' || h === 'modelo')] || '';
         const kCpu = headers[headersLower.findIndex(h => h === 'tempo_computacional_seg' || h === 'tempo_cpu_ms')] || '';
         const kInst = headers[headersLower.findIndex(h => h === 'arquivo_instancia' || h === 'instancia')] || '';
+        const kTv = headers[headersLower.findIndex(h => h === 'tempo_viagem' || h === 'tempo_viagem_f' || h === 'media_tempo_viagem')] || '';
+        const kPeso = headers[headersLower.findIndex(h => h === 'peso_acumulado' || h === 'peso' || h === 'media_peso_acumulado')] || '';
+        const kOcup = headers[headersLower.findIndex(h => h === 'pct_ocupacao_mochila' || h === 'ocupacao_mochila' || h === 'media_pct_ocupacao_mochila')] || '';
+        const kItens = headers[headersLower.findIndex(h => h === 'qtd_itens' || h === 'qtd_itens_coletados' || h === 'media_qtd_itens')] || '';
 
         const agrupado = {{}};
         const instSet = new Set();
@@ -1271,19 +1291,27 @@ def gerar_html_dashboard(
 
           if (kInst && r[kInst]) instSet.add(r[kInst]);
           const key = `${{mod}}||${{solv}}`;
-          if (!agrupado[key]) agrupado[key] = {{ mod, solv, lucros: [], cpus: [] }};
+          if (!agrupado[key]) agrupado[key] = {{ mod, solv, lucros: [], cpus: [], tvs: [], pesos: [], ocups: [], itens: [] }};
           agrupado[key].lucros.push(g);
           if (kCpu && r[kCpu]) {{
             let c = parseFloat(r[kCpu]);
             if (kCpu.toLowerCase().includes('seg')) c *= 1000.0;
             agrupado[key].cpus.push(c);
           }}
+          if (kTv && r[kTv] !== '' && !isNaN(parseFloat(r[kTv]))) agrupado[key].tvs.push(parseFloat(r[kTv]));
+          if (kPeso && r[kPeso] !== '' && !isNaN(parseFloat(r[kPeso]))) agrupado[key].pesos.push(parseFloat(r[kPeso]));
+          if (kOcup && r[kOcup] !== '' && !isNaN(parseFloat(r[kOcup]))) agrupado[key].ocups.push(parseFloat(r[kOcup]));
+          if (kItens && r[kItens] !== '' && !isNaN(parseFloat(r[kItens]))) agrupado[key].itens.push(parseFloat(r[kItens]));
         }});
 
         const brutos = [];
         Object.values(agrupado).forEach(d => {{
           const st = calcularEstatisticasArray(d.lucros);
           const cpuMed = d.cpus.length > 0 ? (d.cpus.reduce((a,b)=>a+b,0)/d.cpus.length) : 1.0;
+          const tvMed = d.tvs.length > 0 ? (d.tvs.reduce((a,b)=>a+b,0)/d.tvs.length) : 0.0;
+          const pesoMed = d.pesos.length > 0 ? (d.pesos.reduce((a,b)=>a+b,0)/d.pesos.length) : 0.0;
+          const ocupMed = d.ocups.length > 0 ? (d.ocups.reduce((a,b)=>a+b,0)/d.ocups.length) : 0.0;
+          const itensMed = d.itens.length > 0 ? (d.itens.reduce((a,b)=>a+b,0)/d.itens.length) : 0.0;
           brutos.push({{
             modelo: d.mod,
             solver: d.solv,
@@ -1295,10 +1323,10 @@ def gerar_html_dashboard(
             q3_G: st.q3.toFixed(4),
             max_G: st.max.toFixed(4),
             media_tempo_cpu_ms: cpuMed.toFixed(2),
-            media_tempo_viagem: '0.0',
-            media_peso_acumulado: '0.0',
-            media_pct_ocupacao_mochila: '0.0',
-            media_qtd_itens: '0'
+            media_tempo_viagem: tvMed.toFixed(4),
+            media_peso_acumulado: pesoMed.toFixed(4),
+            media_pct_ocupacao_mochila: ocupMed.toFixed(2),
+            media_qtd_itens: itensMed.toFixed(1)
           }});
         }});
 
