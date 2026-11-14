@@ -27,6 +27,18 @@ from .pgch_operators import (
     rand_flip_one_item,
     two_opt_convencional_move,
 )
+from .wsm_operators import (
+    ParetoEntry,
+    atualizar_arquivo_pareto,
+    avaliar_biobjetivo,
+    calcular_distancia_media_cidades,
+    explorar_2opt_com_filtro_beta,
+    explorar_bit_flip_amostrado,
+    extrair_melhor_ttp1_do_arquivo,
+    itens_para_plano_coleta,
+    randomized_packing_algorithm,
+    selecionar_pivo,
+)
 
 __all__ = [
     "pack",
@@ -48,4 +60,14 @@ __all__ = [
     "calcular_perfis_e_fronteira_coco",
     "pgch_estendido_move",
     "boundary_bit_flip",
+    "ParetoEntry",
+    "avaliar_biobjetivo",
+    "atualizar_arquivo_pareto",
+    "selecionar_pivo",
+    "randomized_packing_algorithm",
+    "calcular_distancia_media_cidades",
+    "explorar_2opt_com_filtro_beta",
+    "explorar_bit_flip_amostrado",
+    "itens_para_plano_coleta",
+    "extrair_melhor_ttp1_do_arquivo",
 ]

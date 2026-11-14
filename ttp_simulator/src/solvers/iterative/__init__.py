@@ -30,6 +30,7 @@ from .pack_iterative import (
     resolver_pack_iterative,
 )
 from .pgch_solvers import CTTP2OptSolver, CTTPPGCHSolver
+from .wsm_solvers import WSMSolver
 from ..operators import (
     bit_flip,
     calcular_prefixo_minimo,
@@ -61,6 +62,7 @@ __all__ = [
     "rand_flip_one_item",
     "CTTP2OptSolver",
     "CTTPPGCHSolver",
+    "WSMSolver",
     "CoCoSolver",
     "Cosolver2BFirstFitSolver",
     "Cosolver2BBestFitSolver",

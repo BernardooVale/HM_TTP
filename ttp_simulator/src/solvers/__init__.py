@@ -31,6 +31,7 @@ from .iterative import (
     FaulknerS4Solver,
     FaulknerS5Solver,
     PackIterativeSolver,
+    WSMSolver,
     refinar_plano_coleta,
     resolver_pack_iterative,
 )
@@ -89,6 +90,7 @@ __all__ = [
     "CoCoSolver",
     "CTTP2OptSolver",
     "CTTPPGCHSolver",
+    "WSMSolver",
     "Cosolver2BFirstFitSolver",
     "Cosolver2BBestFitSolver",
     "S2HeuristicSolver",
