@@ -226,10 +226,15 @@ class QueimadaSolver(BaseSolver):
         modelo: str = "TTP1",
         otimizar_buracos: Optional[bool] = None,
         grafo_direcionado: Optional[bool] = None,
+        usar_pack_iterative: Optional[bool] = None,
+        usar_delaunay_2opt: Optional[bool] = None,
+        pos_otimizacao: Optional[str] = None,
+        time_limit_pos: float = 2.0,
         nome: Optional[str] = None,
     ):
         # Carrega dinamicamente a melhor configuração conhecida persistida
-        cfg = obter_melhor_configuracao("queimada")
+        chave_cfg = "queimada_construtiva" if nome == "queimada_construtiva" else "queimada"
+        cfg = obter_melhor_configuracao(chave_cfg)
         """
         Parâmetros:
         - temperatura:              'total_value', 'knapsack_exact', 'knapsack_greedy', 'net_value_depot' (padrão ótimo: 'total_value')
@@ -273,6 +278,22 @@ class QueimadaSolver(BaseSolver):
                 self.metodo_construcao in ("backward_directed", "forward_directed"),
             )
         self.modelo = modelo
+        self.usar_pack_iterative = (
+            usar_pack_iterative
+            if usar_pack_iterative is not None
+            else cfg.get("usar_pack_iterative", False)
+        )
+        self.usar_delaunay_2opt = (
+            usar_delaunay_2opt
+            if usar_delaunay_2opt is not None
+            else cfg.get("usar_delaunay_2opt", False)
+        )
+        self.pos_otimizacao = (
+            pos_otimizacao
+            if pos_otimizacao is not None
+            else cfg.get("pos_otimizacao", "nenhuma")
+        )
+        self.time_limit_pos = time_limit_pos
         self._nome = nome or "queimada"
 
     @property
@@ -565,6 +586,7 @@ class QueimadaSolver(BaseSolver):
                 self.afinidade_termica,
                 round(gamma, 4),
                 self.refinamento_rota,
+                bool(self.usar_delaunay_2opt) if self.refinamento_rota else False,
                 dir_dep,
             )
             rota_base = cache.get(base_key)
@@ -590,7 +612,7 @@ class QueimadaSolver(BaseSolver):
                     )
                 rota_list = rota_arr.tolist()
                 if self.refinamento_rota and n > 3:
-                    rota_list = otimizar_2opt(rota_list, instance.grafo)
+                    rota_list = self._refinar_rota_tsp_inicial(rota_list, instance.grafo)
                 rota_base = tuple(rota_list)
                 cache.set(base_key, rota_base)
 
@@ -757,7 +779,7 @@ class QueimadaSolver(BaseSolver):
 
         # Refinamento de rota via 2-opt (se ativado)
         if self.refinamento_rota and n > 3:
-            rota = otimizar_2opt(rota, instance.grafo)
+            rota = self._refinar_rota_tsp_inicial(rota, instance.grafo)
 
         # Duas orientações do ciclo (horário e anti-horário)
         rota_rev = [1] + list(reversed(rota[1:]))
@@ -1043,13 +1065,201 @@ class QueimadaSolver(BaseSolver):
         rota = self._construir_rota(instance, calor, temperaturas)
 
         # 4. Selecionar itens de acordo com o valor relativo ao caminho
-        plano_coleta = self._selecionar_itens(instance, rota)
+        if self.usar_pack_iterative and self.modelo == "TTP1":
+            from src.solvers.operators.faulkner_operators import pack_iterative
+            plano_coleta, _ = pack_iterative(instance, rota)
+        else:
+            plano_coleta = self._selecionar_itens(instance, rota)
 
         # 5. Otimização de trechos vazios ("buracos") pós-mochila
         if self.otimizar_buracos:
             rota = otimizar_trechos_vazios(instance, rota, plano_coleta)
 
+        # 6. Pós-otimização iterativa coordenada opcional (TTP1)
+        if self.pos_otimizacao != "nenhuma" and self.modelo == "TTP1":
+            rota, plano_coleta = self._executar_pos_otimizacao(
+                instance, rota, plano_coleta
+            )
+
         return SolucaoTTP(rota=rota, plano_coleta=plano_coleta)
+
+    def _refinar_rota_tsp_inicial(
+        self,
+        rota: List[int],
+        grafo,
+    ) -> List[int]:
+        """Refina a rota TSP inicial via 2-OPT tradicional ou podado por Delaunay."""
+        if not self.usar_delaunay_2opt:
+            return otimizar_2opt(rota, grafo)
+
+        from src.solvers.operators.cosolver2b_operators import gerar_grafo_delaunay
+
+        n = len(rota)
+        if n <= 3:
+            return list(rota)
+
+        adj = gerar_grafo_delaunay(grafo)
+        dist_mtx = getattr(grafo, "_distance_matrix", None)
+
+        def _d(u: int, v: int) -> float:
+            return float(dist_mtx[u, v]) if dist_mtx is not None else float(grafo.distancia(u, v))
+
+        rota_atual = list(rota)
+        melhorou = True
+        while melhorou:
+            melhorou = False
+            pos_map = {cid: idx for idx, cid in enumerate(rota_atual)}
+            for i in range(1, n - 1):
+                u1, v1 = rota_atual[i - 1], rota_atual[i]
+                d_u1_v1 = _d(u1, v1)
+                for viz in adj.get(v1, ()):
+                    j = pos_map.get(viz, -1)
+                    if j <= i:
+                        continue
+                    u2, v2 = rota_atual[j], rota_atual[(j + 1) % n]
+                    delta = _d(u1, u2) + _d(v1, v2) - d_u1_v1 - _d(u2, v2)
+                    if delta < -1e-9:
+                        rota_atual[i : j + 1] = rota_atual[i : j + 1][::-1]
+                        melhorou = True
+                        break
+                if melhorou:
+                    break
+        return rota_atual
+
+    def _executar_pos_otimizacao(
+        self,
+        instance: TTPInstance,
+        rota: List[int],
+        plano_coleta: Dict[int, List[int]],
+    ) -> Tuple[List[int], Dict[int, List[int]]]:
+        """Aplica pós-otimização coordenada opcional sobre a solução da Queimada."""
+        import time
+
+        start = time.perf_counter()
+
+        if self.pos_otimizacao == "insertion_bitflip":
+            from src.solvers.operators.faulkner_operators import (
+                bit_flip,
+                insertion_local_search,
+            )
+
+            while time.perf_counter() - start < self.time_limit_pos:
+                plano_coleta, _, mel_bf = bit_flip(
+                    instance,
+                    rota,
+                    plano_coleta,
+                    max_passes=1,
+                    time_limit=self.time_limit_pos,
+                    start_time=start,
+                )
+                rota, _, mel_ins = insertion_local_search(
+                    instance,
+                    rota,
+                    plano_coleta,
+                    max_passes=1,
+                    time_limit=self.time_limit_pos,
+                    start_time=start,
+                )
+                if not mel_bf and not mel_ins:
+                    break
+            return rota, plano_coleta
+
+        if self.pos_otimizacao == "boundary_bitflip":
+            from src.solvers.operators.coco_operators import boundary_bit_flip
+            from src.solvers.operators.pgch_operators import (
+                preparar_itens_ordenados_por_cidade,
+            )
+
+            itens_por_cidade, razoes, sentinela = preparar_itens_ordenados_por_cidade(
+                instance
+            )
+            rng = np.random.default_rng(42)
+            plano_coleta, _, _ = boundary_bit_flip(
+                instance,
+                rota,
+                plano_coleta,
+                itens_por_cidade,
+                razoes,
+                sentinela,
+                rng=rng,
+                time_limit=self.time_limit_pos,
+                start_time=start,
+            )
+            return rota, plano_coleta
+
+        if self.pos_otimizacao == "pgch_coco":
+            from src.core.fast_evaluator import FastTTPEvaluator
+            from src.solvers.operators.coco_operators import (
+                boundary_bit_flip,
+                calcular_perfis_e_fronteira_coco,
+                pgch_estendido_move,
+            )
+            from src.solvers.operators.cosolver2b_operators import gerar_grafo_delaunay
+            from src.solvers.operators.pgch_operators import (
+                preparar_itens_ordenados_por_cidade,
+            )
+
+            itens_por_cidade, razoes, sentinela = preparar_itens_ordenados_por_cidade(
+                instance
+            )
+            grafo_delaunay = gerar_grafo_delaunay(instance.grafo)
+            rng = np.random.default_rng(42)
+            n = len(rota)
+
+            while time.perf_counter() - start < self.time_limit_pos and n > 3:
+                ev = FastTTPEvaluator(instance, rota, modelo="TTP1")
+                z_atual = ev.calcular_lucro(
+                    {it_id for ids in plano_coleta.values() for it_id in ids}
+                )
+                melhor_z = z_atual
+                melhor_par: Optional[Tuple[List[int], Dict[int, List[int]]]] = None
+
+                pos_map = {cid: idx for idx, cid in enumerate(rota)}
+                pi_p, omega_q, _ = calcular_perfis_e_fronteira_coco(
+                    rota, plano_coleta, itens_por_cidade, razoes, sentinela
+                )
+                for k1 in range(1, n - 1):
+                    if time.perf_counter() - start >= self.time_limit_pos:
+                        break
+                    for v in grafo_delaunay.get(rota[k1], set()):
+                        k2 = pos_map.get(v, -1)
+                        if k2 > k1:
+                            r_c, p_c = pgch_estendido_move(
+                                rota,
+                                plano_coleta,
+                                k1,
+                                k2,
+                                pi_p,
+                                omega_q,
+                                itens_por_cidade,
+                                razoes,
+                            )
+                            z_c = FastTTPEvaluator(instance, r_c, modelo="TTP1").calcular_lucro(
+                                {it_id for ids in p_c.values() for it_id in ids}
+                            )
+                            if z_c > melhor_z + 1e-9:
+                                melhor_z = z_c
+                                melhor_par = (r_c, p_c)
+
+                mel_tsp = melhor_par is not None
+                if melhor_par is not None:
+                    rota, plano_coleta = melhor_par
+
+                plano_coleta, _, mel_kp = boundary_bit_flip(
+                    instance,
+                    rota,
+                    plano_coleta,
+                    itens_por_cidade,
+                    razoes,
+                    sentinela,
+                    rng=rng,
+                    time_limit=self.time_limit_pos,
+                    start_time=start,
+                )
+                if not mel_tsp and not mel_kp:
+                    break
+
+        return rota, plano_coleta
 
 
 # Registro de variações convenientes para execução via CLI e comparações
@@ -1411,5 +1621,78 @@ SolverRegistry.register(
         "QueimadaEstagio1Solver",
         (QueimadaSolver,),
         {"nome": "queimada_estagio1", "__init__": lambda self: QueimadaSolver.__init__(self, temperatura="net_value_depot", metodo_construcao="backward_edges", adaptar_regime_r=True, otimizar_buracos=True, nome="queimada_estagio1")},
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaConstrutivaSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_construtiva",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                refinamento=False,
+                refinamento_rota=False,
+                otimizar_buracos=False,
+                pos_otimizacao="nenhuma",
+                nome="queimada_construtiva",
+            ),
+        },
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaPGCHCoCoSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_pgch_coco",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                pos_otimizacao="pgch_coco",
+                nome="queimada_pgch_coco",
+            ),
+        },
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaInsertionBitFlipSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_insertion_bitflip",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                pos_otimizacao="insertion_bitflip",
+                nome="queimada_insertion_bitflip",
+            ),
+        },
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaBoundaryBitFlipSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_boundary_bitflip",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                pos_otimizacao="boundary_bitflip",
+                nome="queimada_boundary_bitflip",
+            ),
+        },
+    )
+)
+SolverRegistry.register(
+    type(
+        "QueimadaPackIterativeSolver",
+        (QueimadaSolver,),
+        {
+            "nome": "queimada_pack_iterative",
+            "__init__": lambda self: QueimadaSolver.__init__(
+                self,
+                usar_pack_iterative=True,
+                nome="queimada_pack_iterative",
+            ),
+        },
     )
 )

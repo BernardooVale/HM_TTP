@@ -116,6 +116,9 @@ def _executar_uma_tarefa(
         grafo_direcionado=grafo_dir,
         adaptar_regime_r=cfg.get("adaptar_regime_r", False),
         velocidade_dinamica=cfg.get("velocidade_dinamica", False),
+        usar_pack_iterative=cfg.get("usar_pack_iterative", False),
+        usar_delaunay_2opt=cfg.get("usar_delaunay_2opt", False),
+        pos_otimizacao=cfg.get("pos_otimizacao", "nenhuma"),
         modelo=modelo,
     )
 
@@ -413,8 +416,64 @@ def gerar_espaco_configuracoes(tipo_espaco: str = "completo", deduplicar: bool =
             })
         return configuracoes
 
+    elif tipo_espaco == "hibrido":
+        # Espaço unificado contemplando configurações puramente construtivas e
+        # variantes híbridas/iterativas (PackIterative, PGCH CoCo, Insertion+BitFlip)
+        metodos = ["kruskal", "backward_edges", "backward_directed", "forward_directed"]
+        afinidades = [False, True]
+        rotas_2opt = [False, True]
+        buracos_opts = [False, True]
+        refinamentos = [False, True]
+        packs_iter = [False, True]
+        delaunay_opts = [False, True]
+        pos_opts = ["nenhuma", "pgch_coco", "insertion_bitflip", "boundary_bitflip"]
+
+        configuracoes = []
+        for temp, diss, direcao, metodo, afin, r_2opt, del_2opt, buraco, sel, ordem, ref, p_iter, pos_opt in itertools.product(
+            temperaturas,
+            dissipacoes,
+            direcoes,
+            metodos,
+            afinidades,
+            rotas_2opt,
+            delaunay_opts,
+            buracos_opts,
+            selecoes,
+            ordens,
+            refinamentos,
+            packs_iter,
+            pos_opts,
+        ):
+            if deduplicar:
+                if sel == "knapsack_relative" and ordem != "densidade":
+                    continue
+                if p_iter and (sel != "greedy_relative" or ordem != "densidade"):
+                    continue
+                if not r_2opt and del_2opt:
+                    continue
+
+            configuracoes.append({
+                "temperatura": temp,
+                "dissipacao": diss,
+                "direcao": direcao,
+                "metodo_construcao": metodo,
+                "afinidade_termica": afin,
+                "refinamento_rota": r_2opt,
+                "usar_delaunay_2opt": del_2opt,
+                "otimizar_buracos": buraco,
+                "selecao": sel,
+                "ordem_selecao": ordem,
+                "refinamento": ref,
+                "grafo_direcionado": metodo in ("backward_directed", "forward_directed"),
+                "adaptar_regime_r": False,
+                "velocidade_dinamica": False,
+                "usar_pack_iterative": p_iter,
+                "pos_otimizacao": pos_opt,
+            })
+        return configuracoes
+
     else:
-        raise ValueError(f"Espaço de busca inválido: {tipo_espaco}. Escolha entre 'completo', 'direcionado', 'padrao', 'rapido', 'estagio1', 'estagio2'.")
+        raise ValueError(f"Espaço de busca inválido: {tipo_espaco}. Escolha entre 'completo', 'hibrido', 'direcionado', 'padrao', 'rapido', 'estagio1', 'estagio2'.")
 
 
 def resolver_instancias(
@@ -848,9 +907,49 @@ def executar_grid_search(
                     detalhes={"total_instancias": len(instancias), "instancias": [f.name for f in instancias], "espaco": espaco},
                 )
             if atualizou:
-                print(f"\n🏆 AUTO-UPDATE: Nova melhor configuração da Queimada salva automaticamente (Score: {melhor_g:.2f})!")
+                print(f"\n🏆 AUTO-UPDATE: Nova melhor configuração da Queimada (Geral/Iterativa) salva automaticamente (Score: {melhor_g:.2f})!")
             else:
-                print(f"\nℹ️ AUTO-UPDATE: Configuração campeã atual mantida no registro persistido.")
+                print(f"\nℹ️ AUTO-UPDATE: Configuração campeã geral atual mantida no registro persistido.")
+
+            # Salva também a melhor configuração estritamente construtiva
+            ranking_construtivo = [
+                item
+                for item in ranking
+                if not configuracoes[item[3]].get("refinamento", False)
+                and not configuracoes[item[3]].get("refinamento_rota", False)
+                and not configuracoes[item[3]].get("otimizar_buracos", False)
+                and configuracoes[item[3]].get("pos_otimizacao", "nenhuma") == "nenhuma"
+            ]
+            if ranking_construtivo:
+                const_g, _, _, const_c_id = ranking_construtivo[0]
+                const_cfg = configuracoes[const_c_id]
+                detalhes_const = {
+                    "total_instancias": len(instancias),
+                    "instancias": [f.name for f in instancias],
+                    "espaco": espaco,
+                    "modo": "estritamente_construtivo",
+                }
+                if forcar_campeao:
+                    detalhes_const["motivo"] = "forcar_campeao"
+                    atualizou_c = salvar_melhor_configuracao(
+                        "queimada_construtiva",
+                        const_cfg,
+                        score=const_g,
+                        origem=f"grid_search_paralelo_{espaco}",
+                        detalhes=detalhes_const,
+                    )
+                else:
+                    atualizou_c = atualizar_campeao_se_melhor(
+                        "queimada_construtiva",
+                        const_cfg,
+                        const_g,
+                        origem=f"grid_search_paralelo_{espaco}",
+                        detalhes=detalhes_const,
+                    )
+                if atualizou_c:
+                    print(f"🏆 AUTO-UPDATE: Nova melhor configuração CONSTRUTIVA salva em 'queimada_construtiva' (Score: {const_g:.2f})!")
+                else:
+                    print(f"ℹ️ AUTO-UPDATE: Configuração 'queimada_construtiva' atual mantida (melhor construtiva da rodada: {const_g:.2f}).")
         except Exception as e:
             print(f"\n⚠️ Falha ao atualizar configuração campeã: {e}")
 
@@ -913,9 +1012,9 @@ def parse_args():
     )
     parser.add_argument(
         "--espaco",
-        choices=["completo", "direcionado", "padrao", "rapido", "estagio1", "estagio2"],
+        choices=["completo", "hibrido", "direcionado", "padrao", "rapido", "estagio1", "estagio2"],
         default="completo",
-        help="Espaço de configurações: 'estagio1' (16 - Rota e Campo Térmico), 'estagio2' (4 - Coleta e Velocidade Marginal), 'completo' (unificado), 'direcionado' (backward/forward direcionadas), 'padrao' (288), ou 'rapido' (sem 2-opt/Drop&Add).",
+        help="Espaço de configurações: 'estagio1', 'estagio2', 'completo', 'hibrido' (construtivo + PGCH CoCo / Insertion+BitFlip / PackIterative), 'direcionado', 'padrao', ou 'rapido'.",
     )
     parser.add_argument(
         "--instancias",
