@@ -9,6 +9,7 @@ Reúne solucionadores e operadores baseados em melhoria iterativa e busca local:
 """
 
 from .cosolver import CoSolver
+from .cosolver2b_solvers import Cosolver2BBestFitSolver, Cosolver2BFirstFitSolver
 from .faulkner_solvers import (
     FaulknerC1Solver,
     FaulknerC2Solver,
@@ -59,6 +60,8 @@ __all__ = [
     "rand_flip_one_item",
     "CTTP2OptSolver",
     "CTTPPGCHSolver",
+    "Cosolver2BFirstFitSolver",
+    "Cosolver2BBestFitSolver",
     "FaulknerS2Solver",
     "FaulknerS3Solver",
     "FaulknerS4Solver",

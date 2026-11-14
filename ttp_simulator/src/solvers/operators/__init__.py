@@ -1,5 +1,13 @@
 """Operadores compartilhados para solucionadores construtivos e iterativos."""
 
+from .cosolver2b_operators import (
+    bit_flip_cosolver2b,
+    gerar_grafo_delaunay,
+    indexar_itens_por_cidade,
+    inicializar_acumuladores,
+    insercao_e_eliminacao,
+    two_opt_delaunay,
+)
 from .faulkner_operators import (
     bit_flip,
     insertion_local_search,
@@ -26,4 +34,10 @@ __all__ = [
     "two_opt_convencional_move",
     "pgch_move",
     "rand_flip_one_item",
+    "gerar_grafo_delaunay",
+    "indexar_itens_por_cidade",
+    "insercao_e_eliminacao",
+    "inicializar_acumuladores",
+    "two_opt_delaunay",
+    "bit_flip_cosolver2b",
 ]
