@@ -93,6 +93,7 @@ class _BaseReinforceNSSolver(BaseSolver):
         neighbor_ranking: str = "distance",
         modelo: str = "TTP1",
         seed: Optional[int] = 42,
+        hot_start_solver_name: Optional[str] = None,
     ):
         if search_strategy not in ("rlns", "pm"):
             raise ValueError("search_strategy deve ser 'rlns' ou 'pm'.")
@@ -112,6 +113,7 @@ class _BaseReinforceNSSolver(BaseSolver):
         self.neighbor_ranking = neighbor_ranking
         self.modelo = modelo
         self.seed = seed
+        self.hot_start_solver_name = hot_start_solver_name
         self.last_telemetry: Optional[ReinforceNSRunTelemetry] = None
 
     @property
@@ -219,13 +221,33 @@ class _BaseReinforceNSSolver(BaseSolver):
             ):
                 break
 
-            # Linhas 5-6 do Algorithm 1: Solução inicial (Π, P) <- CLKH + IGP(Π)
-            tour, init_plan, igp = self._build_initial_solution(
-                instance=instance,
-                base_lk_tour=base_lk_tour,
-                start_idx=start_idx,
-                deadline=deadline,
-            )
+            # Linhas 5-6 do Algorithm 1: Solução inicial (Π, P) <- CLKH + IGP(Π) (ou hot-start)
+            if start_idx == 0 and self.hot_start_solver_name is not None:
+                from src.core.fast_evaluator import FastTTPEvaluator
+                from src.solvers.base import SolverRegistry
+
+                hs_solver = SolverRegistry.get(self.hot_start_solver_name)
+                hs_sol = hs_solver.solve(instance)
+                hs_order = list(hs_sol.rota)
+                dm = instance.grafo.distance_matrix
+                hs_cost = float(
+                    sum(dm[hs_order[i], hs_order[(i + 1) % len(hs_order)]] for i in range(len(hs_order)))
+                )
+                tour = Tour(order=hs_order, cost=hs_cost)
+                tour.normalize_to_city_1()
+                igp = IGP(scenario=instance, tour=tour, modelo=self.modelo)
+                igp_plan = igp.solve(theta=5.0, num_iterations=self.igp_iterations)
+                # Mantém o melhor plano entre o hot-start e o IGP sobre a rota do hot-start
+                ev_hs = FastTTPEvaluator(instance, tour.order, modelo=self.modelo)
+                z_hs = ev_hs.calcular_lucro({i for ids in hs_sol.plano_coleta.values() for i in ids})
+                init_plan = hs_sol.plano_coleta if z_hs >= getattr(igp, "best_score", -float("inf")) else igp_plan
+            else:
+                tour, init_plan, igp = self._build_initial_solution(
+                    instance=instance,
+                    base_lk_tour=base_lk_tour,
+                    start_idx=start_idx,
+                    deadline=deadline,
+                )
 
             k_val = getattr(igp, "best_k", 1.0)
             beta_val = getattr(igp, "best_beta", 1.0)
@@ -397,4 +419,26 @@ class ReinforceNSPMP2Solver(_BaseReinforceNSSolver):
     def __init__(self, **kwargs):
         kwargs.setdefault("search_strategy", "pm")
         kwargs.setdefault("post_opt_mode", "P2")
+        super().__init__(**kwargs)
+
+
+@SolverRegistry.register("reinforcens_queimada")
+class ReinforceNSQueimadaSolver(_BaseReinforceNSSolver):
+    """ReinforceNS (Q-Learning + P3) com hot-start inicial da Heurística da Queimada."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("search_strategy", "rlns")
+        kwargs.setdefault("post_opt_mode", "P3")
+        kwargs.setdefault("hot_start_solver_name", "queimada")
+        super().__init__(**kwargs)
+
+
+@SolverRegistry.register("reinforcens_pm_queimada")
+class ReinforceNSPMQueimadaSolver(_BaseReinforceNSSolver):
+    """ReinforceNS-PM (First Improvement + P3) com hot-start inicial da Heurística da Queimada."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("search_strategy", "pm")
+        kwargs.setdefault("post_opt_mode", "P3")
+        kwargs.setdefault("hot_start_solver_name", "queimada")
         super().__init__(**kwargs)

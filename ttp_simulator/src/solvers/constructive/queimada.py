@@ -229,7 +229,7 @@ class QueimadaSolver(BaseSolver):
         usar_pack_iterative: Optional[bool] = None,
         usar_delaunay_2opt: Optional[bool] = None,
         pos_otimizacao: Optional[str] = None,
-        time_limit_pos: float = 2.0,
+        time_limit_pos: float = 5.0,
         nome: Optional[str] = None,
     ):
         # Carrega dinamicamente a melhor configuração conhecida persistida

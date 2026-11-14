@@ -369,3 +369,8 @@ A suíte de testes unitários cobre modelos matemáticos, parsers, avaliadores e
 ```
 
 Todos os 108 testes automatizados passam com sucesso em frações de segundo.
+
+## 9. Teste final
+
+Foi adicionado um script em ```scripts\benchmark\avaliar_todos_solvers.py``` para testar todos os solucionadores.
+Para rodar apenas os relacionados à RL, rode ```scripts\executar_experimento_reinforcens.py```
