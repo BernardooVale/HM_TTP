@@ -1,5 +1,10 @@
 """Operadores compartilhados para solucionadores construtivos e iterativos."""
 
+from .coco_operators import (
+    boundary_bit_flip,
+    calcular_perfis_e_fronteira_coco,
+    pgch_estendido_move,
+)
 from .cosolver2b_operators import (
     bit_flip_cosolver2b,
     gerar_grafo_delaunay,
@@ -40,4 +45,7 @@ __all__ = [
     "inicializar_acumuladores",
     "two_opt_delaunay",
     "bit_flip_cosolver2b",
+    "calcular_perfis_e_fronteira_coco",
+    "pgch_estendido_move",
+    "boundary_bit_flip",
 ]

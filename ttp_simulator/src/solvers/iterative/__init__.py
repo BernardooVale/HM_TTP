@@ -8,6 +8,7 @@ Reúne solucionadores e operadores baseados em melhoria iterativa e busca local:
 - refinar_plano_coleta, resolver_pack_iterative: Operadores centrais de refinamento.
 """
 
+from .coco_solvers import CoCoSolver
 from .cosolver import CoSolver
 from .cosolver2b_solvers import Cosolver2BBestFitSolver, Cosolver2BFirstFitSolver
 from .faulkner_solvers import (
@@ -60,6 +61,7 @@ __all__ = [
     "rand_flip_one_item",
     "CTTP2OptSolver",
     "CTTPPGCHSolver",
+    "CoCoSolver",
     "Cosolver2BFirstFitSolver",
     "Cosolver2BBestFitSolver",
     "FaulknerS2Solver",
