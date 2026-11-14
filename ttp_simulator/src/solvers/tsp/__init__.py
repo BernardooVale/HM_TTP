@@ -1,5 +1,5 @@
 from .cheapest_insertion import CheapInsertionRegret
-from .CLK import LKLocalSearch, TourKicker, DoubleBridge
+from .CLK import ChainedLK, LKLocalSearch, TourKicker, DoubleBridge
 from .construction import (
     resolver_tsp_farthest_insertion,
     resolver_tsp_multistart_nn,
@@ -13,6 +13,7 @@ from .two_opt import (
 
 __all__ = [
     "CheapInsertionRegret",
+    "ChainedLK",
     "LKLocalSearch",
     "TourKicker",
     "DoubleBridge",

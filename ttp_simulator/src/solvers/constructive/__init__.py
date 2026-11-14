@@ -10,6 +10,7 @@ de forma direta e estruturada:
 """
 
 from .baselines import GreedyIsolatedSolver, RandomSolver
+from .faulkner_s1 import FaulknerS1Solver
 from .heuristic_37 import Heuristic37Solver
 from .queimada import (
     QueimadaSolver,
@@ -21,6 +22,7 @@ from .s2_s5_solvers import S2HeuristicSolver, S5HeuristicSolver
 __all__ = [
     "RandomSolver",
     "GreedyIsolatedSolver",
+    "FaulknerS1Solver",
     "Heuristic37Solver",
     "QueimadaSolver",
     "S2HeuristicSolver",

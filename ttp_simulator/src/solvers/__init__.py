@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .base import BaseSolver, SolverRegistry
 from .constructive import (
+    FaulknerS1Solver,
     GreedyIsolatedSolver,
     Heuristic37Solver,
     QueimadaSolver,
@@ -14,6 +15,16 @@ from .constructive import (
 from .iterative import (
     AlternateLocalSearchSolver,
     CoSolver,
+    FaulknerC1Solver,
+    FaulknerC2Solver,
+    FaulknerC3Solver,
+    FaulknerC4Solver,
+    FaulknerC5Solver,
+    FaulknerC6Solver,
+    FaulknerS2Solver,
+    FaulknerS3Solver,
+    FaulknerS4Solver,
+    FaulknerS5Solver,
     PackIterativeSolver,
     refinar_plano_coleta,
     resolver_pack_iterative,
@@ -26,6 +37,7 @@ _ignorar = {
     "__init__",
     "tsp",
     "packing",
+    "operators",
     "templates",
     "constructive",
     "iterative",

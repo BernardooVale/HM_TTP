@@ -289,10 +289,12 @@ class DoubleBridge(TourKicker):
     def sample_first_edge_candidates(
         tour: Tour,
         first_edge_sample_size: float = 0.1,
+        rng: Optional[np.random.Generator] = None,
     ):
         sample_count = max(1, int(first_edge_sample_size * tour.length))
         sample_count = min(sample_count, len(tour.order))
-        candidate_list = np.random.choice(
+        chooser = rng.choice if rng is not None else np.random.choice
+        candidate_list = chooser(
             tour.order,
             size=sample_count,
             replace=False,
@@ -306,9 +308,10 @@ class DoubleBridge(TourKicker):
         tour: Tour,
         grafo: Grafo,
         first_edge_sample_size: float = 0.1,
+        rng: Optional[np.random.Generator] = None,
     ):
         candidates = self.sample_first_edge_candidates(
-            tour, first_edge_sample_size
+            tour, first_edge_sample_size, rng=rng
         )
         best_candidate = None
         max_potential = -math.inf
@@ -334,6 +337,7 @@ class DoubleBridge(TourKicker):
         tour: Tour,
         grafo: Grafo,
         num_candidates: int = 10,
+        rng: Optional[np.random.Generator] = None,
     ):
         edges_to_delete = []
         edges_to_delete.append((
@@ -363,7 +367,10 @@ class DoubleBridge(TourKicker):
             remaining_nodes = [
                 int(n) for n in tour.order if int(n) not in added_nodes
             ]
-            np.random.shuffle(remaining_nodes)
+            if rng is not None:
+                rng.shuffle(remaining_nodes)
+            else:
+                np.random.shuffle(remaining_nodes)
             for node in remaining_nodes:
                 if (
                     node not in added_nodes
@@ -410,10 +417,11 @@ class DoubleBridge(TourKicker):
         self,
         tour: Tour,
         grafo: Grafo,
+        rng: Optional[np.random.Generator] = None,
     ):
-        best_candidate = self.select_first_edge(tour, grafo)
+        best_candidate = self.select_first_edge(tour, grafo, rng=rng)
         delete_edges = self.select_double_bridge(
-            best_candidate, tour=tour, grafo=grafo
+            best_candidate, tour=tour, grafo=grafo, rng=rng
         )
         return self.execute_double_bridge(delete_edges, tour=tour, grafo=grafo)
 
@@ -432,15 +440,38 @@ class ChainedLK:
     num_tries: int = 5
     num_kicks: int = 5
     kicker: Optional[TourKicker] = None
+    seed: Optional[int] = None
 
     def __post_init__(self):
         if self.kicker is None:
             self.kicker = DoubleBridge()
 
-    def solve(self, initial_tour: Optional[Tour] = None) -> Tour:
+    def _build_random_tour(self, rng: np.random.Generator) -> Tour:
+        cidades = [int(c) for c in self.grafo.cidades.keys() if c != 1]
+        rng.shuffle(cidades)
+        order = [1] + cidades if 1 in self.grafo.cidades else cidades
+        cost = float(
+            sum(
+                self.grafo.distance_matrix[order[i], order[(i + 1) % len(order)]]
+                for i in range(len(order))
+            )
+        )
+        return Tour(order=order, cost=cost)
+
+    def solve(
+        self,
+        initial_tour: Optional[Tour] = None,
+        random_start: bool = False,
+    ) -> Tour:
+        rng = np.random.default_rng(self.seed) if self.seed is not None else None
+
         if initial_tour is None:
-            constructor = CheapInsertionRegret(grafo=self.grafo)
-            tour = constructor.find_regret_insertion()
+            if random_start:
+                tour_rng = rng if rng is not None else np.random.default_rng()
+                tour = self._build_random_tour(tour_rng)
+            else:
+                constructor = CheapInsertionRegret(grafo=self.grafo)
+                tour = constructor.find_regret_insertion()
         else:
             tour = deepcopy(initial_tour)
 
@@ -451,7 +482,10 @@ class ChainedLK:
         if best_tour.length >= 8 and self.num_kicks > 0:
             for _ in range(self.num_kicks):
                 try:
-                    kicked_tour = self.kicker.kick(best_tour, self.grafo)
+                    if rng is not None and isinstance(self.kicker, DoubleBridge):
+                        kicked_tour = self.kicker.kick(best_tour, self.grafo, rng=rng)
+                    else:
+                        kicked_tour = self.kicker.kick(best_tour, self.grafo)
                 except ValueError:
                     continue
                 cand_tour, cand_cost = lk.solve(kicked_tour)
