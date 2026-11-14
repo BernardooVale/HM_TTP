@@ -27,12 +27,18 @@ from .pack_iterative import (
     refinar_plano_coleta,
     resolver_pack_iterative,
 )
+from .pgch_solvers import CTTP2OptSolver, CTTPPGCHSolver
 from ..operators import (
     bit_flip,
+    calcular_prefixo_minimo,
     insertion_local_search,
     one_plus_one_ea,
     pack,
     pack_iterative,
+    pgch_move,
+    preparar_itens_ordenados_por_cidade,
+    rand_flip_one_item,
+    two_opt_convencional_move,
 )
 
 __all__ = [
@@ -46,6 +52,13 @@ __all__ = [
     "bit_flip",
     "one_plus_one_ea",
     "insertion_local_search",
+    "preparar_itens_ordenados_por_cidade",
+    "calcular_prefixo_minimo",
+    "two_opt_convencional_move",
+    "pgch_move",
+    "rand_flip_one_item",
+    "CTTP2OptSolver",
+    "CTTPPGCHSolver",
     "FaulknerS2Solver",
     "FaulknerS3Solver",
     "FaulknerS4Solver",

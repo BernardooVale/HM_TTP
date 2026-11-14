@@ -14,6 +14,8 @@ from .constructive import (
 )
 from .iterative import (
     AlternateLocalSearchSolver,
+    CTTP2OptSolver,
+    CTTPPGCHSolver,
     CoSolver,
     FaulknerC1Solver,
     FaulknerC2Solver,
@@ -81,6 +83,8 @@ __all__ = [
     "QueimadaSolver",
     "PackIterativeSolver",
     "CoSolver",
+    "CTTP2OptSolver",
+    "CTTPPGCHSolver",
     "S2HeuristicSolver",
     "S5HeuristicSolver",
     "refinar_plano_coleta",
