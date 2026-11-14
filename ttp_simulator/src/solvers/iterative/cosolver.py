@@ -8,6 +8,7 @@ In Proceedings of the Genetic and Evolutionary Computation Conference (GECCO 201
 IEEE Congress on Evolutionary Computation (CEC 2015).
 """
 
+import time
 from typing import Dict, List, Optional
 from src.core.models import TTPInstance, SolucaoTTP
 from src.core.evaluator_ttp1 import avaliar_ttp1
@@ -29,8 +30,9 @@ class CoSolver(BaseSolver):
     3. Alterna entre as duas etapas até a convergência ou atingir o limite de iterações.
     """
 
-    def __init__(self, max_rounds: int = 5, nome: Optional[str] = None):
+    def __init__(self, max_rounds: int = 5, time_limit: float = 5.0, nome: Optional[str] = None):
         self.max_rounds = max_rounds
+        self.time_limit = time_limit
         self._nome = nome or "cosolver"
 
     @property
@@ -38,6 +40,7 @@ class CoSolver(BaseSolver):
         return self._nome
 
     def solve(self, instance: TTPInstance) -> SolucaoTTP:
+        t0 = time.perf_counter()
         # 1. Rota inicial de alta qualidade e plano inicial PackIterative
         rota = list(obter_melhor_rota_tsp(instance.grafo))
         plano = resolver_pack_iterative(instance, rota, max_refinamento_iter=30)
@@ -49,12 +52,21 @@ class CoSolver(BaseSolver):
         n = len(rota)
 
         for _ in range(self.max_rounds):
+            if self.time_limit and (time.perf_counter() - t0) >= self.time_limit:
+                break
             melhorou_round = False
 
             # --- ETAPA 1: Otimização da rota via 2-opt com plano fixo ---
             rota_melhorou = False
+            tempo_esgotado = False
             for i in range(1, n - 1):
+                if self.time_limit and (time.perf_counter() - t0) >= self.time_limit:
+                    tempo_esgotado = True
+                    break
                 for j in range(i + 1, n):
+                    if self.time_limit and (time.perf_counter() - t0) >= self.time_limit:
+                        tempo_esgotado = True
+                        break
                     # Inversão 2-opt mantendo a cidade 1 na posição 0
                     nova_rota = rota[:i] + rota[i : j + 1][::-1] + rota[j + 1 :]
                     obj_cand = avaliar_ttp1(
@@ -69,6 +81,9 @@ class CoSolver(BaseSolver):
                         break
                 if rota_melhorou:
                     break
+
+            if tempo_esgotado or (self.time_limit and (time.perf_counter() - t0) >= self.time_limit):
+                break
 
             # --- ETAPA 2: Otimização do empacotamento via PackIterative com rota fixa ---
             novo_plano = refinar_plano_coleta(instance, rota, plano, max_iter=20)

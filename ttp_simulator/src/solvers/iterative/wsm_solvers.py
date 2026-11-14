@@ -79,6 +79,7 @@ class WSMSolver(BaseSolver):
                 num_tries=self.clk_tries,
                 num_kicks=self.clk_kicks,
                 seed=iter_seed,
+                deadline=start + self.time_limit,
             )
             rota = list(clk.solve(random_start=(iter_idx > 0)).order)
 

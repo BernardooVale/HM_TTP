@@ -10,6 +10,7 @@ Calcula RDI (Relative Deviation Index), Lucro Medio (G), Desvio Padrao, Melhor L
 Taxa de Vitorias e Tempo Medio, separando por suite (Equilibradas, ReinforceNS e Geral).
 """
 
+import argparse
 import concurrent.futures
 import csv
 import importlib
@@ -40,7 +41,34 @@ import src.solvers
 for _mod in pkgutil.walk_packages(src.solvers.__path__, "src.solvers."):
     importlib.import_module(_mod.name)
 
-SOLVERS_ALVO = [
+SOLVERS_CAMPEOES = [
+    # Construtivos classicos & Faulkner (2015) - campeoes empiricos em <=5s
+    "s5_refinada",
+    "faulkner_c3",
+    # Literatura TTP
+    "pack_iterative",
+    "local_search",
+    "cosolver",
+    "cttp_2opt",
+    "coco_solver",
+    "wsm_solver",
+    # Queimada (campea construtiva e campea hibrida/iterativa)
+    "queimada_construtiva",
+    "queimada",
+    # ReinforceNS (Hot-Start Queimada)
+    "reinforcens_pm",
+    "reinforcens_queimada",
+    "reinforcens_pm_queimada",
+]
+
+SOLVERS_RL = [
+    "reinforcens",
+    "reinforcens_pm",
+    "reinforcens_queimada",
+    "reinforcens_pm_queimada",
+]
+
+SOLVERS_COMPLETO = [
     # Baselines
     "random",
     "greedy",
@@ -105,8 +133,8 @@ def _load_instance(path_str: str):
     return _INST_CACHE[path_str]
 
 
-def _run_task(args: Tuple[str, str, int]) -> Dict[str, Any]:
-    solver_name, path_str, seed = args
+def _run_task(args: Tuple[str, str, int, float]) -> Dict[str, Any]:
+    solver_name, path_str, seed, time_limit = args
     inst = _load_instance(path_str)
     inst_name = Path(path_str).name
 
@@ -115,9 +143,9 @@ def _run_task(args: Tuple[str, str, int]) -> Dict[str, Any]:
 
     solver = SolverRegistry.get(solver_name)
     if hasattr(solver, "time_limit"):
-        solver.time_limit = TIME_LIMIT_STD
+        solver.time_limit = time_limit
     if hasattr(solver, "time_limit_pos"):
-        solver.time_limit_pos = TIME_LIMIT_STD
+        solver.time_limit_pos = time_limit
     if hasattr(solver, "seed"):
         solver.seed = seed
 
@@ -177,6 +205,7 @@ def coletar_instancias() -> Tuple[Dict[str, str], Dict[str, Dict[str, bool]]]:
 def calcular_resumo(
     rows: List[Dict[str, Any]],
     instancias_alvo: List[str],
+    solvers_ativos: List[str],
     titulo: str,
     out_csv: Path,
 ) -> List[Dict[str, Any]]:
@@ -194,13 +223,13 @@ def calcular_resumo(
     best_inst: Dict[str, float] = {}
     worst_inst: Dict[str, float] = {}
     for inst in instancias_alvo:
-        means = [np.mean(by_si[(s, inst)]) for s in SOLVERS_ALVO if (s, inst) in by_si]
+        means = [np.mean(by_si[(s, inst)]) for s in solvers_ativos if (s, inst) in by_si]
         if means:
             best_inst[inst] = float(max(means))
             worst_inst[inst] = float(min(means))
 
     summary_rows = []
-    for s in SOLVERS_ALVO:
+    for s in solvers_ativos:
         inst_means = []
         inst_bests = []
         inst_stds = []
@@ -285,39 +314,96 @@ def calcular_resumo(
 
 
 def main():
-    out_dir = _raiz / "results" / "benchmark_completo"
+    parser = argparse.ArgumentParser(
+        description="Benchmark comparativo de solvers TTP1 com RDI e Lucro Medio."
+    )
+    parser.add_argument(
+        "--modo",
+        choices=["campeoes", "completo", "rl"],
+        default="campeoes",
+        help="Conjunto de solvers: 'campeoes' (padrao, 14 representantes), 'completo' (36) ou 'rl' (4 ReinforceNS).",
+    )
+    parser.add_argument(
+        "--instancias",
+        choices=["todas", "equilibradas", "reinforcens"],
+        default="todas",
+        help="Subconjunto de instancias: 'todas' (padrao), 'equilibradas' ou 'reinforcens'.",
+    )
+    parser.add_argument(
+        "--solvers",
+        nargs="+",
+        default=None,
+        help="Lista explicita de solvers (sobrescreve --modo).",
+    )
+    parser.add_argument(
+        "--time-limit",
+        type=float,
+        default=TIME_LIMIT_STD,
+        help=f"Limite de tempo padrao em segundos (padrao: {TIME_LIMIT_STD}).",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=min(12, os.cpu_count() or 8),
+        help="Numero de processos paralelos.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="results/benchmark_completo",
+        help="Diretorio de saida para os CSVs.",
+    )
+    args = parser.parse_args()
+
+    if args.solvers:
+        solvers_ativos = args.solvers
+    elif args.modo == "completo":
+        solvers_ativos = SOLVERS_COMPLETO
+    elif args.modo == "rl":
+        solvers_ativos = SOLVERS_RL
+    else:
+        solvers_ativos = SOLVERS_CAMPEOES
+
+    out_dir = (_raiz / args.output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     raw_csv = out_dir / "execucoes_detalhadas.csv"
 
     inst_paths, meta = coletar_instancias()
     eq_list = sorted([k for k, v in meta.items() if v["equilibradas"]])
     rf_list = sorted([k for k, v in meta.items() if v["reinforcens"]])
-    all_list = sorted(inst_paths.keys())
+    if args.instancias == "equilibradas":
+        target_list = eq_list
+    elif args.instancias == "reinforcens":
+        target_list = rf_list
+    else:
+        target_list = sorted(inst_paths.keys())
 
-    print(f"Instancias coletadas: {len(all_list)} unicas ({len(eq_list)} equilibradas, {len(rf_list)} reinforcens)")
-    print(f"Solvers avaliados: {len(SOLVERS_ALVO)} | Time limit padrao: {TIME_LIMIT_STD}s | Seeds estocasticos: {SEEDS}")
+    print(
+        f"Instancias alvo: {len(target_list)} ({args.instancias}) | "
+        f"Modo: {args.modo} ({len(solvers_ativos)} solvers) | "
+        f"Time limit: {args.time_limit}s | Seeds estocasticos: {SEEDS}"
+    )
 
     tasks = []
-    for s in SOLVERS_ALVO:
+    for s in solvers_ativos:
         seeds = SEEDS if s in STOCHASTIC_SOLVERS else [42]
-        for inst_name in all_list:
+        for inst_name in target_list:
             path_str = inst_paths[inst_name]
             for seed in seeds:
-                tasks.append((s, path_str, seed))
+                tasks.append((s, path_str, seed, args.time_limit))
 
-    print(f"Total de execucoes programadas: {len(tasks)}")
+    print(f"Total de execucoes programadas: {len(tasks)} (workers={args.workers})")
     rows: List[Dict[str, Any]] = []
     t_start = time.perf_counter()
 
-    workers = min(12, os.cpu_count() or 8)
-    with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as ex:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=args.workers) as ex:
         done = 0
         for res in ex.map(_run_task, tasks, chunksize=2):
             res["in_equilibradas"] = meta[res["instancia"]]["equilibradas"]
             res["in_reinforcens"] = meta[res["instancia"]]["reinforcens"]
             rows.append(res)
             done += 1
-            if done % 100 == 0 or done == len(tasks):
+            if done % 50 == 0 or done == len(tasks):
                 elapsed = time.perf_counter() - t_start
                 print(f"Progresso: {done}/{len(tasks)} ({100.0*done/len(tasks):.1f}%) | {elapsed:.1f}s", flush=True)
 
@@ -346,9 +432,12 @@ def main():
         for e in erros[:10]:
             print(f"  - {e['solver']} @ {e['instancia']} (seed={e['seed']}): {e['erro']}")
 
-    calcular_resumo(rows, eq_list, "EQUILIBRADAS", out_dir / "resumo_equilibradas.csv")
-    calcular_resumo(rows, rf_list, "REINFORCENS", out_dir / "resumo_reinforcens.csv")
-    calcular_resumo(rows, all_list, "CONSOLIDADO GERAL", out_dir / "resumo_geral.csv")
+    if args.instancias in ("todas", "equilibradas"):
+        calcular_resumo(rows, eq_list, solvers_ativos, "EQUILIBRADAS", out_dir / "resumo_equilibradas.csv")
+    if args.instancias in ("todas", "reinforcens"):
+        calcular_resumo(rows, rf_list, solvers_ativos, "REINFORCENS", out_dir / "resumo_reinforcens.csv")
+    if args.instancias == "todas":
+        calcular_resumo(rows, target_list, solvers_ativos, "CONSOLIDADO GERAL", out_dir / "resumo_geral.csv")
     print(f"\nCSV detalhado salvo em: {raw_csv}")
 
 

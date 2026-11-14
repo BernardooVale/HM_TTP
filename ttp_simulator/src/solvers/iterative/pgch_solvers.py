@@ -106,6 +106,8 @@ class _CTTPBaseSolver(BaseSolver):
                     candidatos_k2 = list(range(k1 + 1, min(n, k1 + 1 + self.k_vizinhos)))
 
                 for k2 in candidatos_k2:
+                    if time.perf_counter() - start_global >= self.time_limit:
+                        break
                     if self.use_pgch:
                         r_cand, p_cand = pgch_move(
                             rota_atual,
@@ -161,6 +163,7 @@ class _CTTPBaseSolver(BaseSolver):
                 num_tries=self.clk_tries,
                 num_kicks=self.clk_kicks,
                 seed=iter_seed,
+                deadline=start_global + self.time_limit,
             )
             rota = list(clk.solve(random_start=(restart_idx > 0)).order)
             plano, z_atual = pack_iterative(instance, rota)
@@ -196,7 +199,7 @@ class _CTTPBaseSolver(BaseSolver):
                     plano,
                     duration_seconds=duracao_kp,
                     rng=rng,
-                    min_iters=max(1, len(instance.itens)),
+                    min_iters=1,
                 )
                 z_atual = z_kp
 

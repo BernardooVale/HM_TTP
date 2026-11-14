@@ -1,4 +1,5 @@
 import math
+import time
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Dict, Optional, Tuple
@@ -15,6 +16,7 @@ from src.solvers.tsp.cheapest_insertion import CheapInsertionRegret
 class LKLocalSearch:
     grafo: Grafo
     num_tries: int = 5
+    deadline: Optional[float] = None
 
     def update_best_cost(self, new_cost: float):
         self.best_cost = min(self.best_cost, new_cost)
@@ -230,6 +232,8 @@ class LKLocalSearch:
         nodes_to_explore = set(self.tour.order)
 
         while nodes_to_explore:
+            if self.deadline is not None and time.perf_counter() >= self.deadline:
+                return False
             start_node = nodes_to_explore.pop()
             around_start_node = best_tour.around(start_node)
             for t_2 in around_start_node:
@@ -267,6 +271,8 @@ class LKLocalSearch:
         better = True
 
         while better:
+            if self.deadline is not None and time.perf_counter() >= self.deadline:
+                break
             better = self.lin_kernighan()
             self.solutions.add(str(self.tour.order))
 
@@ -441,6 +447,7 @@ class ChainedLK:
     num_kicks: int = 5
     kicker: Optional[TourKicker] = None
     seed: Optional[int] = None
+    deadline: Optional[float] = None
 
     def __post_init__(self):
         if self.kicker is None:
@@ -475,12 +482,14 @@ class ChainedLK:
         else:
             tour = deepcopy(initial_tour)
 
-        lk = LKLocalSearch(grafo=self.grafo, num_tries=self.num_tries)
+        lk = LKLocalSearch(grafo=self.grafo, num_tries=self.num_tries, deadline=self.deadline)
         best_tour, _ = lk.solve(tour)
 
         # DoubleBridge exige ao menos 8 vértices para 4 arestas disjuntas
         if best_tour.length >= 8 and self.num_kicks > 0:
             for _ in range(self.num_kicks):
+                if self.deadline is not None and time.perf_counter() >= self.deadline:
+                    break
                 try:
                     if rng is not None and isinstance(self.kicker, DoubleBridge):
                         kicked_tour = self.kicker.kick(best_tour, self.grafo, rng=rng)

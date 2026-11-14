@@ -98,6 +98,8 @@ class CoCoSolver(BaseSolver):
                 )
 
                 for k2 in candidatos_k2:
+                    if time.perf_counter() - start_global >= self.time_limit:
+                        break
                     r_cand, p_cand = pgch_estendido_move(
                         rota_atual,
                         plano_atual,
@@ -144,6 +146,7 @@ class CoCoSolver(BaseSolver):
                 num_tries=self.clk_tries,
                 num_kicks=self.clk_kicks,
                 seed=iter_seed,
+                deadline=start_global + self.time_limit,
             )
             rota = list(clk.solve(random_start=(restart_idx > 0)).order)
             plano, z_atual = pack_iterative(instance, rota)
@@ -164,6 +167,14 @@ class CoCoSolver(BaseSolver):
                     grafo_delaunay,
                     start_global,
                 )
+                if z_tsp > melhor_z_global:
+                    melhor_rota_global = list(rota)
+                    melhor_plano_global = {
+                        c: list(ids) for c, ids in plano.items() if ids
+                    }
+                    melhor_z_global = z_tsp
+                if time.perf_counter() - start_global >= self.time_limit:
+                    break
                 plano, z_kp, _ = boundary_bit_flip(
                     instance,
                     rota,

@@ -44,12 +44,14 @@ class FaulknerBaseSolver(BaseSolver):
         instance: TTPInstance,
         seed: Optional[int],
         random_start: bool = False,
+        deadline: Optional[float] = None,
     ) -> List[int]:
         clk = ChainedLK(
             grafo=instance.grafo,
             num_tries=self.clk_tries,
             num_kicks=self.clk_kicks,
             seed=seed,
+            deadline=deadline,
         )
         tour = clk.solve(random_start=random_start)
         return list(tour.order)
@@ -69,7 +71,10 @@ class FaulknerBaseSolver(BaseSolver):
         while True:
             iter_seed = None if self.seed is None else self.seed + iter_idx
             rota = self._gerar_rota_clk(
-                instance, seed=iter_seed, random_start=(iter_idx > 0)
+                instance,
+                seed=iter_seed,
+                random_start=(iter_idx > 0),
+                deadline=start_time + budget_seconds,
             )
             plano, z = pack_iterative(
                 instance, rota, c=self.c, delta=self.delta, q=self.q
