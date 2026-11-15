@@ -182,9 +182,12 @@ def coletar_instancias() -> Tuple[Dict[str, str], Dict[str, Dict[str, bool]]]:
     eq_names = obter_instancias_equilibradas()
     bateria_dir = _sim_path / "bateria_testes"
     reinforcens_dir = bateria_dir / "reinforcens"
+    aleatorias_dir = bateria_dir / "aleatorias_equilibradas"
 
     inst_paths: Dict[str, str] = {}
-    meta: Dict[str, Dict[str, bool]] = defaultdict(lambda: {"equilibradas": False, "reinforcens": False})
+    meta: Dict[str, Dict[str, bool]] = defaultdict(
+        lambda: {"equilibradas": False, "reinforcens": False, "aleatorias_equilibradas": False}
+    )
 
     # 1. Equilibradas (prioriza arquivos fora de subpastas ou primeiro encontrado)
     for p in sorted(bateria_dir.rglob("*"), key=lambda x: (len(x.parts), str(x))):
@@ -198,6 +201,14 @@ def coletar_instancias() -> Tuple[Dict[str, str], Dict[str, Dict[str, bool]]]:
         if p.name not in inst_paths:
             inst_paths[p.name] = str(p)
         meta[p.name]["reinforcens"] = True
+
+    # 3. Aleatorias Equilibradas
+    if aleatorias_dir.is_dir():
+        for ext in ("*.txt", "*.ttp"):
+            for p in sorted(aleatorias_dir.glob(ext)):
+                if p.name not in inst_paths:
+                    inst_paths[p.name] = str(p)
+                meta[p.name]["aleatorias_equilibradas"] = True
 
     return inst_paths, meta
 
@@ -325,9 +336,9 @@ def main():
     )
     parser.add_argument(
         "--instancias",
-        choices=["todas", "equilibradas", "reinforcens"],
+        choices=["todas", "equilibradas", "reinforcens", "aleatorias_equilibradas"],
         default="todas",
-        help="Subconjunto de instancias: 'todas' (padrao), 'equilibradas' ou 'reinforcens'.",
+        help="Subconjunto de instancias: 'todas' (equilibradas + reinforcens), 'equilibradas', 'reinforcens' ou 'aleatorias_equilibradas'.",
     )
     parser.add_argument(
         "--solvers",
@@ -371,12 +382,15 @@ def main():
     inst_paths, meta = coletar_instancias()
     eq_list = sorted([k for k, v in meta.items() if v["equilibradas"]])
     rf_list = sorted([k for k, v in meta.items() if v["reinforcens"]])
+    ale_list = sorted([k for k, v in meta.items() if v["aleatorias_equilibradas"]])
     if args.instancias == "equilibradas":
         target_list = eq_list
     elif args.instancias == "reinforcens":
         target_list = rf_list
+    elif args.instancias == "aleatorias_equilibradas":
+        target_list = ale_list
     else:
-        target_list = sorted(inst_paths.keys())
+        target_list = sorted(set(eq_list) | set(rf_list))
 
     print(
         f"Instancias alvo: {len(target_list)} ({args.instancias}) | "
@@ -401,6 +415,7 @@ def main():
         for res in ex.map(_run_task, tasks, chunksize=2):
             res["in_equilibradas"] = meta[res["instancia"]]["equilibradas"]
             res["in_reinforcens"] = meta[res["instancia"]]["reinforcens"]
+            res["in_aleatorias_equilibradas"] = meta[res["instancia"]]["aleatorias_equilibradas"]
             rows.append(res)
             done += 1
             if done % 50 == 0 or done == len(tasks):
@@ -419,6 +434,7 @@ def main():
                 "itens",
                 "in_equilibradas",
                 "in_reinforcens",
+                "in_aleatorias_equilibradas",
                 "status",
                 "erro",
             ],
@@ -436,6 +452,14 @@ def main():
         calcular_resumo(rows, eq_list, solvers_ativos, "EQUILIBRADAS", out_dir / "resumo_equilibradas.csv")
     if args.instancias in ("todas", "reinforcens"):
         calcular_resumo(rows, rf_list, solvers_ativos, "REINFORCENS", out_dir / "resumo_reinforcens.csv")
+    if args.instancias == "aleatorias_equilibradas":
+        calcular_resumo(
+            rows,
+            ale_list,
+            solvers_ativos,
+            "ALEATORIAS EQUILIBRADAS",
+            out_dir / "resumo_aleatorias_equilibradas.csv",
+        )
     if args.instancias == "todas":
         calcular_resumo(rows, target_list, solvers_ativos, "CONSOLIDADO GERAL", out_dir / "resumo_geral.csv")
     print(f"\nCSV detalhado salvo em: {raw_csv}")
