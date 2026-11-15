@@ -55,7 +55,8 @@ SOLVERS_CAMPEOES = [
     # Queimada (campea construtiva e campea hibrida/iterativa)
     "queimada_construtiva",
     "queimada",
-    # ReinforceNS (Hot-Start Queimada)
+    # ReinforceNS (base + PM + Hot-Start Queimada)
+    "reinforcens",
     "reinforcens_pm",
     "reinforcens_queimada",
     "reinforcens_pm_queimada",
@@ -411,16 +412,20 @@ def main():
     t_start = time.perf_counter()
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.workers) as ex:
+        futures = [ex.submit(_run_task, t) for t in tasks]
         done = 0
-        for res in ex.map(_run_task, tasks, chunksize=2):
+        for fut in concurrent.futures.as_completed(futures):
+            res = fut.result()
             res["in_equilibradas"] = meta[res["instancia"]]["equilibradas"]
             res["in_reinforcens"] = meta[res["instancia"]]["reinforcens"]
             res["in_aleatorias_equilibradas"] = meta[res["instancia"]]["aleatorias_equilibradas"]
             rows.append(res)
             done += 1
-            if done % 50 == 0 or done == len(tasks):
+            if done % 25 == 0 or done == len(tasks):
                 elapsed = time.perf_counter() - t_start
                 print(f"Progresso: {done}/{len(tasks)} ({100.0*done/len(tasks):.1f}%) | {elapsed:.1f}s", flush=True)
+
+    rows.sort(key=lambda r: (r["solver"], r["instancia"], r["seed"]))
 
     with open(raw_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(

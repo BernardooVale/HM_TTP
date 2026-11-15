@@ -288,13 +288,10 @@ class Tour:
     def generate(self, broken, joined):
         """
         Gera um tour temporário, considerando as arestas removidas e adicionadas.
-        Primeiro constroi a sequencia do tour a partir das arestas disponíveis,
-        e verifica se o numero de arestas é compatível com o esperado. Depois
-        percorre as arestas para construir o tour final e garantir que não se
-        repete nenhum nó.
+        Constrói a lista de adjacência em O(n) e verifica se as arestas formam
+        um único ciclo hamiltoniano contendo todos os vértices do tour.
 
         Parameters
-
         ----------
         broken : set
             Conjunto de arestas a serem removidas do tour.
@@ -308,54 +305,47 @@ class Tour:
             e a lista de nós do novo tour.
         """
         broken = {self.make_pair(int(i), int(j)) for i, j in broken}
-
         joined = {self.make_pair(int(i), int(j)) for i, j in joined}
-
         edges = (self.edges - broken) | joined
 
-        if len(edges) < self.length:
+        if self.length <= 1:
+            return self.length == 1, list(self.order)
+        if self.length == 2:
+            return len(edges) == 1, list(self.order)
+        if len(edges) != self.length:
             return False, []
 
-        successors = {}
+        adj: dict[int, list[int]] = {}
+        for i, j in edges:
+            adj.setdefault(i, []).append(j)
+            adj.setdefault(j, []).append(i)
+
+        if len(adj) != self.length:
+            return False, []
+
+        for nbrs in adj.values():
+            if len(nbrs) != 2:
+                return False, []
 
         start_node = self.order[0]
-        node = start_node
-
-        while len(edges) > 0:
-            found = False
-
-            for i, j in edges:
-                if i == node:
-                    successors[node] = j
-                    node = j
-                    found = True
-                    break
-
-                elif j == node:
-                    successors[node] = i
-                    node = i
-                    found = True
-                    break
-
-            if not found:
-                break
-
-            edges.remove((i, j))
-
-        if len(successors) < self.length:
+        if start_node not in adj:
             return False, []
 
-        succ = successors[start_node]
-
+        prev = start_node
+        curr = adj[start_node][0]
         new_tour = [start_node]
-        visited = {start_node}
 
-        while succ not in visited:
-            visited.add(succ)
-            new_tour.append(succ)
-            succ = successors[succ]
-        # If we visited all nodes without a loop we have a tour
-        return len(new_tour) == self.length, new_tour
+        # Com grau 2 em todos os vértices, percorrer length - 1 passos sem retornar
+        # ao início garante que o grafo é um único ciclo hamiltoniano.
+        for _ in range(self.length - 1):
+            if curr == start_node:
+                return False, []
+            new_tour.append(curr)
+            n0, n1 = adj[curr]
+            nxt = n1 if n0 == prev else n0
+            prev, curr = curr, nxt
+
+        return curr == start_node, new_tour
 
     def flip(self, segment_start: int, segment_end: int):
         """

@@ -154,6 +154,7 @@ class _CTTPBaseSolver(BaseSolver):
         melhor_rota_global: List[int] = []
         melhor_plano_global: Dict[int, List[int]] = {}
         melhor_z_global = float("-inf")
+        start_global: Optional[float] = None
 
         restart_idx = 0
         while True:
@@ -163,7 +164,7 @@ class _CTTPBaseSolver(BaseSolver):
                 num_tries=self.clk_tries,
                 num_kicks=self.clk_kicks,
                 seed=iter_seed,
-                deadline=start_global + self.time_limit,
+                deadline=None if start_global is None else start_global + self.time_limit,
             )
             rota = list(clk.solve(random_start=(restart_idx > 0)).order)
             plano, z_atual = pack_iterative(instance, rota)
@@ -172,6 +173,9 @@ class _CTTPBaseSolver(BaseSolver):
                 melhor_rota_global = list(rota)
                 melhor_plano_global = {c: list(ids) for c, ids in plano.items() if ids}
                 melhor_z_global = z_atual
+
+            if start_global is None:
+                start_global = time.perf_counter()
 
             # Loop CTTP para este restart
             while time.perf_counter() - start_global < self.time_limit:

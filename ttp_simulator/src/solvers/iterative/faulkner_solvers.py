@@ -143,12 +143,12 @@ class FaulknerC3Solver(FaulknerBaseSolver):
         return "faulkner_c3"
 
     def solve(self, instance: TTPInstance) -> SolucaoTTP:
-        start = time.perf_counter()
         rota, plano, _ = self._amostrar_clk_pack(
-            instance, budget_seconds=0.1 * self.time_limit, start_time=start
+            instance, budget_seconds=0.1 * self.time_limit, start_time=None
         )
+        start_iter = getattr(self, "_last_iter_start", time.perf_counter())
         rota, plano, _ = self._executar_c1(
-            instance, rota, plano, start_time=start, time_limit=self.time_limit
+            instance, rota, plano, start_time=start_iter, time_limit=self.time_limit
         )
         return SolucaoTTP(rota=rota, plano_coleta=plano)
 

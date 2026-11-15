@@ -126,7 +126,6 @@ class CoCoSolver(BaseSolver):
         return rota_atual, plano_atual, z_atual
 
     def solve(self, instance: TTPInstance) -> SolucaoTTP:
-        start_global = time.perf_counter()
         rng = np.random.default_rng(self.seed)
 
         itens_por_cidade, razoes, sentinela = preparar_itens_ordenados_por_cidade(
@@ -137,6 +136,7 @@ class CoCoSolver(BaseSolver):
         melhor_rota_global: List[int] = []
         melhor_plano_global: Dict[int, List[int]] = {}
         melhor_z_global = float("-inf")
+        start_global: Optional[float] = None
 
         restart_idx = 0
         while True:
@@ -146,7 +146,7 @@ class CoCoSolver(BaseSolver):
                 num_tries=self.clk_tries,
                 num_kicks=self.clk_kicks,
                 seed=iter_seed,
-                deadline=start_global + self.time_limit,
+                deadline=None if start_global is None else start_global + self.time_limit,
             )
             rota = list(clk.solve(random_start=(restart_idx > 0)).order)
             plano, z_atual = pack_iterative(instance, rota)
@@ -155,6 +155,9 @@ class CoCoSolver(BaseSolver):
                 melhor_rota_global = list(rota)
                 melhor_plano_global = {c: list(ids) for c, ids in plano.items() if ids}
                 melhor_z_global = z_atual
+
+            if start_global is None:
+                start_global = time.perf_counter()
 
             while time.perf_counter() - start_global < self.time_limit:
                 rota, plano, z_tsp = self._tsp_solver(

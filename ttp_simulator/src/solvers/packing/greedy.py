@@ -1,7 +1,8 @@
 import math
+import time
 from itertools import product
 from math import log
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 from pydantic import ConfigDict
@@ -107,6 +108,7 @@ class IGP:
         self,
         theta: float = 5,
         num_iterations: int = 20,
+        deadline: Optional[float] = None,
     ):
         # Guardrail para caso de borda sem itens
         if not self.scenario.itens:
@@ -134,6 +136,12 @@ class IGP:
         num_samples = int(1000 / log(total_dim))
 
         for _ in range(num_samples):
+            if (
+                best_k is not None
+                and deadline is not None
+                and time.perf_counter() >= deadline
+            ):
+                break
             k, beta, gamma = np.random.rand(3)
             delta = np.random.uniform(0.5, 1)
             packed_items, _ = self.greedy_packing(
@@ -159,6 +167,8 @@ class IGP:
             raise ValueError('No valid solution found')
 
         for _ in range(num_iterations):
+            if deadline is not None and time.perf_counter() >= deadline:
+                break
             (
                 best_score,
                 best_packed_items,

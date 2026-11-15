@@ -94,6 +94,7 @@ class _BaseReinforceNSSolver(BaseSolver):
         modelo: str = "TTP1",
         seed: Optional[int] = 42,
         hot_start_solver_name: Optional[str] = None,
+        hot_start_pos_otimizacao: Optional[str] = "nenhuma",
     ):
         if search_strategy not in ("rlns", "pm"):
             raise ValueError("search_strategy deve ser 'rlns' ou 'pm'.")
@@ -114,6 +115,7 @@ class _BaseReinforceNSSolver(BaseSolver):
         self.modelo = modelo
         self.seed = seed
         self.hot_start_solver_name = hot_start_solver_name
+        self.hot_start_pos_otimizacao = hot_start_pos_otimizacao
         self.last_telemetry: Optional[ReinforceNSRunTelemetry] = None
 
     @property
@@ -123,16 +125,16 @@ class _BaseReinforceNSSolver(BaseSolver):
             return base
         return f"{base}_{self.post_opt_mode.lower()}"
 
-    def _build_initial_solution(
+    def _build_initial_tour(
         self,
         instance: TTPInstance,
         base_lk_tour: Tour,
         start_idx: int,
         deadline: Optional[float] = None,
-    ) -> Tuple[Tour, Dict[int, List[int]], IGP]:
+    ) -> Tour:
         """
-        Gera uma solução inicial (Π, P) via CLKH + IGP com semente controlada
-        por `start_idx`, garantindo pareamento exato entre variantes.
+        Gera o tour inicial Π via CLKH com semente controlada por `start_idx`,
+        garantindo pareamento exato entre variantes.
         Partindo do tour base já refinado por LK (`base_lk_tour`), aplica
         perturbações DoubleBridge seguidas de LKLocalSearch sem repetir o LK
         determinístico inicial sobre o tour de inserção mais barata.
@@ -143,13 +145,13 @@ class _BaseReinforceNSSolver(BaseSolver):
         best_tour = Tour(order=list(base_lk_tour.order), cost=base_lk_tour.cost)
         if best_tour.length >= 8 and self.clk_num_kicks > 0:
             kicker = DoubleBridge()
-            lk = LKLocalSearch(grafo=instance.grafo, num_tries=self.clk_num_tries)
+            lk = LKLocalSearch(
+                grafo=instance.grafo,
+                num_tries=self.clk_num_tries,
+                deadline=deadline,
+            )
             for _ in range(self.clk_num_kicks):
-                if (
-                    start_idx > 0
-                    and deadline is not None
-                    and time.perf_counter() >= deadline
-                ):
+                if deadline is not None and time.perf_counter() >= deadline:
                     break
                 try:
                     kicked_tour = kicker.kick(best_tour, instance.grafo)
@@ -160,11 +162,36 @@ class _BaseReinforceNSSolver(BaseSolver):
                     best_tour = cand_tour
 
         best_tour.normalize_to_city_1()
-        igp = IGP(scenario=instance, tour=best_tour, modelo=self.modelo)
-        pack_dict = igp.solve(theta=5.0, num_iterations=self.igp_iterations)
-        return best_tour, pack_dict, igp
+        return best_tour
+
+    def _obter_base_lk_tour(
+        self, instance: TTPInstance, deadline: Optional[float] = None
+    ) -> Tour:
+        """Constrói e refina o tour base determinístico (CheapInsertionRegret + LK) sob demanda."""
+        cache_attr = f"_cached_base_lk_tour_{self.clk_num_tries}"
+        base_lk_tour = getattr(instance.grafo, cache_attr, None)
+        if base_lk_tour is None:
+            base_ci_tour = CheapInsertionRegret(
+                grafo=instance.grafo
+            ).find_regret_insertion()
+            lk_init = LKLocalSearch(
+                grafo=instance.grafo,
+                num_tries=self.clk_num_tries,
+                deadline=deadline,
+            )
+            base_lk_tour, _ = lk_init.solve(base_ci_tour)
+            base_lk_tour.normalize_to_city_1()
+            if deadline is None or time.perf_counter() < deadline:
+                try:
+                    setattr(instance.grafo, cache_attr, base_lk_tour)
+                except Exception:
+                    pass
+        return base_lk_tour
 
     def solve(self, instance: TTPInstance) -> SolucaoTTP:
+        start_clock = time.perf_counter()
+        deadline: Optional[float] = None
+
         # Linha 3 do Algorithm 1 (Wu et al., 2024): Pré-processamento 1-tree
         prep = build_one_tree_preprocessing(
             grafo=instance.grafo,
@@ -175,27 +202,10 @@ class _BaseReinforceNSSolver(BaseSolver):
             neighbor_ranking=self.neighbor_ranking,
         )
 
-        # Constrói e refina o tour base determinístico (CheapInsertionRegret + LK) uma vez
-        cache_attr = f"_cached_base_lk_tour_{self.clk_num_tries}"
-        base_lk_tour = getattr(instance.grafo, cache_attr, None)
-        if base_lk_tour is None:
-            base_ci_tour = CheapInsertionRegret(
-                grafo=instance.grafo
-            ).find_regret_insertion()
-            lk_init = LKLocalSearch(
-                grafo=instance.grafo, num_tries=self.clk_num_tries
-            )
-            base_lk_tour, _ = lk_init.solve(base_ci_tour)
-            base_lk_tour.normalize_to_city_1()
-            try:
-                setattr(instance.grafo, cache_attr, base_lk_tour)
-            except Exception:
-                pass
-
-        start_clock = time.perf_counter()
-        deadline = (
-            start_clock + self.time_limit
-            if self.time_limit and self.time_limit > 0
+        # Constrói tour base apenas imediatamente se não houver hot-start no start 0
+        base_lk_tour = (
+            self._obter_base_lk_tour(instance, deadline=None)
+            if self.hot_start_solver_name is None
             else None
         )
 
@@ -221,12 +231,14 @@ class _BaseReinforceNSSolver(BaseSolver):
             ):
                 break
 
-            # Linhas 5-6 do Algorithm 1: Solução inicial (Π, P) <- CLKH + IGP(Π) (ou hot-start)
+            # Linhas 5-6 do Algorithm 1: Solução inicial (Π, P) <- CLKH + IGP(Π) (ou hot-start determinístico)
             if start_idx == 0 and self.hot_start_solver_name is not None:
                 from src.core.fast_evaluator import FastTTPEvaluator
                 from src.solvers.base import SolverRegistry
 
                 hs_solver = SolverRegistry.get(self.hot_start_solver_name)
+                if self.hot_start_pos_otimizacao is not None and hasattr(hs_solver, "pos_otimizacao"):
+                    hs_solver.pos_otimizacao = self.hot_start_pos_otimizacao
                 hs_sol = hs_solver.solve(instance)
                 hs_order = list(hs_sol.rota)
                 dm = instance.grafo.distance_matrix
@@ -235,17 +247,39 @@ class _BaseReinforceNSSolver(BaseSolver):
                 )
                 tour = Tour(order=hs_order, cost=hs_cost)
                 tour.normalize_to_city_1()
+                # Inicia o orçamento de tempo após construir o tour/hot-start inicial,
+                # incluindo a busca iterativa do IGP dentro dos 5s
+                if deadline is None and self.time_limit and self.time_limit > 0:
+                    deadline = time.perf_counter() + self.time_limit
                 igp = IGP(scenario=instance, tour=tour, modelo=self.modelo)
-                igp_plan = igp.solve(theta=5.0, num_iterations=self.igp_iterations)
+                igp_plan = igp.solve(
+                    theta=5.0,
+                    num_iterations=self.igp_iterations,
+                    deadline=deadline,
+                )
                 # Mantém o melhor plano entre o hot-start e o IGP sobre a rota do hot-start
                 ev_hs = FastTTPEvaluator(instance, tour.order, modelo=self.modelo)
                 z_hs = ev_hs.calcular_lucro({i for ids in hs_sol.plano_coleta.values() for i in ids})
                 init_plan = hs_sol.plano_coleta if z_hs >= getattr(igp, "best_score", -float("inf")) else igp_plan
             else:
-                tour, init_plan, igp = self._build_initial_solution(
+                if base_lk_tour is None:
+                    base_lk_tour = self._obter_base_lk_tour(
+                        instance, deadline=deadline
+                    )
+                tour = self._build_initial_tour(
                     instance=instance,
                     base_lk_tour=base_lk_tour,
                     start_idx=start_idx,
+                    deadline=deadline,
+                )
+                # Inicia o orçamento de tempo após construir o tour base do start 0,
+                # incluindo a busca iterativa do IGP dentro dos 5s
+                if deadline is None and self.time_limit and self.time_limit > 0:
+                    deadline = time.perf_counter() + self.time_limit
+                igp = IGP(scenario=instance, tour=tour, modelo=self.modelo)
+                init_plan = igp.solve(
+                    theta=5.0,
+                    num_iterations=self.igp_iterations,
                     deadline=deadline,
                 )
 
@@ -263,6 +297,12 @@ class _BaseReinforceNSSolver(BaseSolver):
                 modelo=self.modelo,
             )
             init_state = operator.build_initial_state(tour.order, init_plan)
+            if init_state.objective > best_obj:
+                best_obj = init_state.objective
+                best_route = list(init_state.route)
+                best_plan = {
+                    c: list(ids) for c, ids in init_state.plan.items() if ids
+                }
 
             ls_seed = (
                 int(self.seed) + start_idx * 10007 + 1
@@ -303,7 +343,7 @@ class _BaseReinforceNSSolver(BaseSolver):
                 plan=ls_res.best_state.plan,
                 mode=self.post_opt_mode,
                 modelo=self.modelo,
-                deadline=None,
+                deadline=deadline,
             )
 
             # Linhas 10-14 do Algorithm 1: Atualiza melhor solução global (Π*, P*)

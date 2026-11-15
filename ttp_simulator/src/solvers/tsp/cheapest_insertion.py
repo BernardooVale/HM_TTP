@@ -44,20 +44,34 @@ class CheapInsertionRegret:
         self,
     ) -> Tuple[int, int, float]:
         vertex_in_subtour = set(self.T)
-        best_insert_cost = np.inf
-        best_pos = None
-        best_k = None
-        for k in range(1, self.dist_mtx.shape[0]):
-            if k not in vertex_in_subtour:
-                pos, insert_cost = self.insert_vertex(k)
-                if insert_cost < best_insert_cost:
-                    best_insert_cost = insert_cost
-                    best_k = k
-                    best_pos = pos
-        if best_k is None or best_pos is None:
+        dm = self.dist_mtx
+        ks = np.array(
+            [k for k in range(1, dm.shape[0]) if k not in vertex_in_subtour],
+            dtype=np.intp,
+        )
+        if ks.size == 0 or len(self.T) < 2:
             raise ValueError('No valid insertion found.')
 
-        return int(best_k), int(best_pos), best_insert_cost
+        t_arr = np.asarray(self.T, dtype=np.intp)
+        prev_v = t_arr[:-1]
+        next_v = t_arr[1:]
+        edge_cost = dm[prev_v, next_v][:, None]
+        gains = (
+            dm[prev_v[:, None], ks[None, :]]
+            + dm[ks[None, :], next_v[:, None]]
+            - edge_cost
+        )
+
+        best_pos_per_k = np.argmin(gains, axis=0)
+        best_cost_per_k = gains[best_pos_per_k, np.arange(ks.size)]
+        k_idx = int(np.argmin(best_cost_per_k))
+        best_insert_cost = float(best_cost_per_k[k_idx])
+        if not np.isfinite(best_insert_cost):
+            raise ValueError('No valid insertion found.')
+
+        best_k = int(ks[k_idx])
+        best_pos = int(best_pos_per_k[k_idx]) + 1
+        return best_k, best_pos, best_insert_cost
 
     def find_best_deletion(
         self, del_edge: Tuple[int, int]

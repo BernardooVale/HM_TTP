@@ -62,7 +62,7 @@ class WSMSolver(BaseSolver):
         return "wsm_solver"
 
     def solve_pareto(self, instance: TTPInstance) -> List[ParetoEntry]:
-        start = time.perf_counter()
+        start: Optional[float] = None
         rng = np.random.default_rng(self.seed)
         itens_by_id = {it.id: it for it in instance.itens}
         taxa = float(instance.taxa_aluguel)
@@ -79,12 +79,12 @@ class WSMSolver(BaseSolver):
                 num_tries=self.clk_tries,
                 num_kicks=self.clk_kicks,
                 seed=iter_seed,
-                deadline=start + self.time_limit,
+                deadline=None if start is None else start + self.time_limit,
             )
             rota = list(clk.solve(random_start=(iter_idx > 0)).order)
 
             for k in range(max(1, self.eta)):
-                if k > 0 and time.perf_counter() - start >= self.time_limit:
+                if k > 0 and start is not None and time.perf_counter() - start >= self.time_limit:
                     break
                 alpha = float(rng.random())
                 itens_ids, g, h = randomized_packing_algorithm(
@@ -97,6 +97,9 @@ class WSMSolver(BaseSolver):
                     itens_by_id=itens_by_id,
                 )
                 atualizar_arquivo_pareto(arquivo, rota, itens_ids, g, h)
+                # Dispara o relógio após construir a primeira solução inicial (k == 0)
+                if start is None:
+                    start = time.perf_counter()
 
             if not arquivo:
                 break

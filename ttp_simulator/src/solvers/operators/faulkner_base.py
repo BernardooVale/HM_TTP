@@ -60,7 +60,7 @@ class FaulknerBaseSolver(BaseSolver):
         self,
         instance: TTPInstance,
         budget_seconds: float,
-        start_time: float,
+        start_time: Optional[float] = None,
     ) -> Tuple[List[int], Dict[int, List[int]], float]:
         """Executa amostragem CLK + PackIterative dentro do orçamento de tempo."""
         melhor_rota: List[int] = []
@@ -74,7 +74,7 @@ class FaulknerBaseSolver(BaseSolver):
                 instance,
                 seed=iter_seed,
                 random_start=(iter_idx > 0),
-                deadline=start_time + budget_seconds,
+                deadline=None if start_time is None else start_time + budget_seconds,
             )
             plano, z = pack_iterative(
                 instance, rota, c=self.c, delta=self.delta, q=self.q
@@ -83,6 +83,10 @@ class FaulknerBaseSolver(BaseSolver):
                 melhor_rota = rota
                 melhor_plano = plano
                 melhor_z = z
+
+            if start_time is None:
+                start_time = time.perf_counter()
+                self._last_iter_start = start_time
 
             iter_idx += 1
             if time.perf_counter() - start_time >= budget_seconds:

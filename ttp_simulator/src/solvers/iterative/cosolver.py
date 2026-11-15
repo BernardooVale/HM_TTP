@@ -40,7 +40,6 @@ class CoSolver(BaseSolver):
         return self._nome
 
     def solve(self, instance: TTPInstance) -> SolucaoTTP:
-        t0 = time.perf_counter()
         # 1. Rota inicial de alta qualidade e plano inicial PackIterative
         rota = list(obter_melhor_rota_tsp(instance.grafo))
         plano = resolver_pack_iterative(instance, rota, max_refinamento_iter=30)
@@ -48,6 +47,8 @@ class CoSolver(BaseSolver):
         melhor_obj = avaliar_ttp1(instance, SolucaoTTP(rota=rota, plano_coleta=plano)).get(
             "lucro_liquido_G", float("-inf")
         )
+
+        t0 = time.perf_counter()
 
         n = len(rota)
 
